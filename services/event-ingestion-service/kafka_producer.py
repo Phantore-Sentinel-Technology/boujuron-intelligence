@@ -1,7 +1,7 @@
 from confluent_kafka import Producer
 import json
 
-from config import settings
+from config.settings import settings
 
 conf = {
     "bootstrap.servers": settings.KAFKA_BOOTSTRAP_SERVER
