@@ -1,7 +1,7 @@
-from confluent_kafka import Consumer
-import json
-import psycopg2
 from config.settings import settings
+from confluent_kafka import Consumer
+import psycopg2
+import json
 
 conf = {
     "bootstrap.servers": settings.KAFKA_BOOTSTRAP_SERVER,

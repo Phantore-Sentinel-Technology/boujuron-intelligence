@@ -1,6 +1,7 @@
+from .models import Event
+from .kafka_producer import send_event
 from fastapi import FastAPI
-from models import Event
-from kafka_producer import send_event
+
 
 app = FastAPI()
 
