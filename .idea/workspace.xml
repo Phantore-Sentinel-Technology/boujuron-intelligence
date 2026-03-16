@@ -10,9 +10,9 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
-  <component name="ProjectColorInfo"><![CDATA[{
-  "associatedIndex": 3
-}]]></component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 3
+}</component>
   <component name="ProjectId" id="3AxtmcMFUvwqtLmdAWQ6LHA07r8" />
   <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
   <component name="ProjectViewState">
@@ -23,10 +23,13 @@
   "keyToString": {
     "RunOnceActivity.OpenProjectViewOnStart": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
-    "git-widget-placeholder": "master",
+    "git-widget-placeholder": "feature/kafka-consumer-worker",
     "kotlin-language-version-configured": "true",
     "last_opened_file_path": "C:/Users/Lenovo/IdeaProjects/phantore-sentinel-app",
     "nodejs_package_manager_path": "npm",
+    "project.structure.last.edited": "Modules",
+    "project.structure.proportion": "0.0",
+    "project.structure.side.proportion": "0.0",
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
@@ -39,6 +42,7 @@
       <option name="presentableId" value="Default" />
       <updated>1773546213784</updated>
       <workItem from="1773546214867" duration="53000" />
+      <workItem from="1773627268925" duration="79000" />
     </task>
     <servers />
   </component>
