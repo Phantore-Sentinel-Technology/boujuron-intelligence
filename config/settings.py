@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     DEBUG: bool = "true"
 
     # Kafka
-    KAFKA_BOOTSTRAP_SERVER = str
+    KAFKA_BOOTSTRAP_SERVER: str
     KAFKA_TOPIC_EVENTS: str = "user_events"
     KAFKA_API_KEY: str
     KAFKA_API_SECRET: str
@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     API_KEY: str
 
     class Config:
-        env_file: ".env"
-        case_sensitive: "true"
+        env_file = ".env"
+        case_sensitive = True
 
 
 @lru_cache()
