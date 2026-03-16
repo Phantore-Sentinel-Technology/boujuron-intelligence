@@ -31,3 +31,7 @@ def get_settings():
 
 
 settings = get_settings()
+
+
+def KAFKA_BOOTSTRAP_SERVER():
+    return None
