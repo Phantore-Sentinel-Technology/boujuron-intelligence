@@ -34,11 +34,12 @@ services:
       - kafka
     env_file:
       - .env
+    command: uvicorn services.event_ingestion_service.main:app --host 0.0.0.0 --port 8000
 
   consumer:
     build: .
-    command: python consumer_service/consumer.py
     depends_on:
       - kafka
     env_file:
       - .env
+    command: python infrastructure/kafka_consumer/consumer.py
