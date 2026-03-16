@@ -1,18 +1,16 @@
 from confluent_kafka import Producer
 import json
 
+from config import settings
+
 conf = {
-    'bootstrap.servers': 'BOOTSTRAP_SERVER',
-    'security.protocol': 'SASL_SSL',
-    'sasl.mechanisms': 'PLAIN',
-    'sasl.username': 'API_KEY',
-    'sasl.password': 'API_SECRET'
+    "bootstrap.servers": settings.KAFKA_BOOTSTRAP_SERVER
 }
 
 producer = Producer(conf)
 
-def send_event(event):
 
+def send_event(event):
     producer.produce(
         "user_events",
         json.dumps(event).encode("utf-8")
