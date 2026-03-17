@@ -1,18 +1,29 @@
 from config.settings import settings
-from confluent_kafka import Producer
+from kafka import KafkaProducer
 import json
+import time
 
+producer = None
 
-conf = {
-    "bootstrap.servers": settings.KAFKA_BOOTSTRAP_SERVER
-}
+def get_producer():
+    global producer
 
-producer = Producer(conf)
+    while producer is None:
+        try:
+            print("Connecting to Kafka...")
+            producer = KafkaProducer(
+                bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVER,
+                value_serializer=lambda v: json.dumps(v).encode("utf-8")
+            )
+            print("Connected to Kafka ✅")
+        except Exception as e:
+            print("Kafka not ready, retrying in 5 seconds...")
+            time.sleep(5)
+
+    return producer
 
 
 def send_event(event):
-    producer.produce(
-        "user_events",
-        json.dumps(event).encode("utf-8")
-    )
-    producer.flush()
+    kafka_producer = get_producer()
+    kafka_producer.send(settings.KAFKA_TOPIC_EVENTS, event)
+    kafka_producer.flush()
