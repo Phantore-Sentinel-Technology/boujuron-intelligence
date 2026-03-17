@@ -1,7 +1,7 @@
 fastapi
 uvicorn
-kafka-python
 psycopg2-binary
 pydantic
 pydantic-settings
 python-dotenv
+confluent-kafka
