@@ -43,3 +43,14 @@ services:
     env_file:
       - .env
     command: python infrastructure/kafka_consumer/consumer.py
+
+
+  postgres:
+    image: postgres:15
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: sentinel
+    ports:
+      - "5432:5432"

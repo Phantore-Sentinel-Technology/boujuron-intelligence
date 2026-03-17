@@ -5,6 +5,7 @@ import time
 
 producer = None
 
+
 def get_producer():
     global producer
 
