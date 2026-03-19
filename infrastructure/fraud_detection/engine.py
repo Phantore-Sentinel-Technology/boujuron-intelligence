@@ -27,7 +27,7 @@ def is_fraud(event):
         return True, "Multiple IPs detected"
 
     # For Multiple devices
-    devices = {e["device"] for _, e in user_events[user_id]}
+    devices = {e["device_type"] for _, e in user_events[user_id]}
     if len(devices) > 2:
         return True, "Multiple devices detected"
 
