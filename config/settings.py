@@ -1,24 +1,27 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+from typing import Optional
 
 
 class Settings(BaseSettings):
     # Application
     APP_NAME: str = "Phantore Sentinel"
     ENVIRONMENT: str = "development"
-    DEBUG: bool = "true"
+    DEBUG: bool = True
 
     # Kafka
     KAFKA_BOOTSTRAP_SERVER: str
     KAFKA_TOPIC_EVENTS: str = "user_events"
-    KAFKA_API_KEY: str
-    KAFKA_API_SECRET: str
+
+    # ✅ MAKE OPTIONAL
+    KAFKA_API_KEY: Optional[str] = None
+    KAFKA_API_SECRET: Optional[str] = None
 
     # Database
     DATABASE_URL: str
 
-    # Security
-    API_KEY: str
+    # ✅ MAKE OPTIONAL
+    API_KEY: Optional[str] = None
 
     class Config:
         env_file = ".env"
@@ -31,7 +34,3 @@ def get_settings():
 
 
 settings = get_settings()
-
-
-def KAFKA_BOOTSTRAP_SERVER():
-    return None
