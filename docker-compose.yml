@@ -25,6 +25,17 @@ services:
       - "9092:9092"
       - "9644:9644"
 
+  postgres:
+    image: postgres:15
+    platform: linux/amd64   # ✅ FIX 1 (CRITICAL)
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: sentinel
+    ports:
+      - "5432:5432"
+
   ingestion:
     build: .
     container_name: event_ingestion
@@ -32,6 +43,7 @@ services:
       - "8000:8000"
     depends_on:
       - kafka
+      - postgres   # ✅ FIX 2
     env_file:
       - .env
     command: uvicorn services.event_ingestion_service.main:app --host 0.0.0.0 --port 8000
@@ -40,17 +52,7 @@ services:
     build: .
     depends_on:
       - kafka
+      - postgres   # ✅ FIX 3
     env_file:
       - .env
     command: python infrastructure/kafka_consumer/consumer.py
-
-
-  postgres:
-    image: postgres:15
-    container_name: postgres_db
-    environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin
-      POSTGRES_DB: sentinel
-    ports:
-      - "5432:5432"

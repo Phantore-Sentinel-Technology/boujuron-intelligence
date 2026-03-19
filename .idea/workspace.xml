@@ -10,6 +10,9 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
+  <component name="MarkdownSettingsMigration">
+    <option name="stateVersion" value="1" />
+  </component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 3
 }</component>
@@ -23,7 +26,7 @@
   "keyToString": {
     "RunOnceActivity.OpenProjectViewOnStart": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
-    "git-widget-placeholder": "feature/kafka-consumer-worker",
+    "git-widget-placeholder": "dev",
     "kotlin-language-version-configured": "true",
     "last_opened_file_path": "C:/Users/Lenovo/IdeaProjects/phantore-sentinel-app",
     "nodejs_package_manager_path": "npm",
@@ -43,6 +46,7 @@
       <updated>1773546213784</updated>
       <workItem from="1773546214867" duration="53000" />
       <workItem from="1773627268925" duration="79000" />
+      <workItem from="1773754877326" duration="43000" />
     </task>
     <servers />
   </component>
