@@ -55,7 +55,6 @@ print("🚀 Consumer + Fraud Engine started...")
 
 counter = 0
 
-# ✅ Safe consume loop
 while True:
     try:
         msg = consumer.poll(timeout_ms=1000)
@@ -63,13 +62,10 @@ while True:
         if msg is None:
             continue
 
-        if msg.error():
-            print("Kafka error:", msg.error())
-            continue
-
         print("📥 MESSAGE RECEIVED")
 
-        event = msg.value  # ✅ FIXED
+        # ✅ CORRECT: get actual event data
+        event = msg.value
 
         # STORE EVENT
         cursor.execute(
@@ -113,5 +109,5 @@ while True:
             counter = 0
 
     except Exception as e:
-        print("Error processing message:", e)
+        print("❌ Error processing message:", e)
         time.sleep(2)
