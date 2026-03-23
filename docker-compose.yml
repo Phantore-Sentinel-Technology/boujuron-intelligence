@@ -43,3 +43,4 @@ services:
     env_file:
       - .env
     command: python infrastructure/kafka_consumer/consumer.py
+    restart: always
