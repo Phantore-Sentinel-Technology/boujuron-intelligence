@@ -63,9 +63,13 @@ while True:
         if msg is None:
             continue
 
+        if msg.error():
+            print("Kafka error:", msg.error())
+            continue
+
         print("📥 MESSAGE RECEIVED")
 
-        event = msg.value
+        event = msg.value  # ✅ FIXED
 
         # STORE EVENT
         cursor.execute(
