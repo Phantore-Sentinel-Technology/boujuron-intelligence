@@ -2,23 +2,33 @@ from config.settings import settings
 from kafka import KafkaConsumer
 import sqlite3
 import json
+import time
 
 from infrastructure.fraud_detection.engine import is_fraud
 
-# ✅ Kafka consumer
-consumer = KafkaConsumer(
-    settings.KAFKA_TOPIC_EVENTS,
-    bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVER,
-    value_deserializer=lambda x: json.loads(x.decode("utf-8")),
-    auto_offset_reset="earliest",
-    group_id="phantore-group"
-)
+# ✅ Kafka connection retry
+consumer = None
+
+while consumer is None:
+    try:
+        print(f"Connecting to Kafka at {settings.KAFKA_BOOTSTRAP_SERVER}...")
+        consumer = KafkaConsumer(
+            settings.KAFKA_TOPIC_EVENTS,
+            bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVER,
+            value_deserializer=lambda x: json.loads(x.decode("utf-8")),
+            auto_offset_reset="earliest",
+            group_id="phantore-group"
+        )
+        print("Connected to Kafka ✅")
+    except Exception:
+        print("Kafka not ready, retrying in 5 seconds...")
+        time.sleep(5)
 
 # ✅ SQLite DB
 conn = sqlite3.connect("events.db", check_same_thread=False)
 cursor = conn.cursor()
 
-# ✅ Create events table
+# Tables
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,7 +40,6 @@ CREATE TABLE IF NOT EXISTS events (
 )
 """)
 
-# ✅ Create fraud alerts table
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS fraud_alerts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,46 +53,61 @@ conn.commit()
 
 print("🚀 Consumer + Fraud Engine started...")
 
-# ✅ Process events
-for message in consumer:
-    event = message.value
+counter = 0
 
-    # STORE EVENT
-    cursor.execute(
-        """
-        INSERT INTO events (user_id, event_type, device, ip, timestamp)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (
-            event["user_id"],
-            event["event_type"],
-            event["device_type"],
-            event["ip"],
-            event["timestamp"]
-        )
-    )
+# ✅ Safe consume loop
+while True:
+    try:
+        msg = consumer.poll(timeout_ms=1000)
 
-    conn.commit()
+        if msg is None:
+            continue
 
-    # FRAUD DETECTION
-    fraud, reason = is_fraud(event)
+        print("📥 MESSAGE RECEIVED")
 
-    if fraud:
-        print("🚨 FRAUD DETECTED:", event, "| Reason:", reason)
+        event = msg.value
 
+        # STORE EVENT
         cursor.execute(
             """
-            INSERT INTO fraud_alerts (user_id, reason, timestamp)
-            VALUES (?, ?, ?)
+            INSERT INTO events (user_id, event_type, device_type, ip, timestamp)
+            VALUES (?, ?, ?, ?, ?)
             """,
             (
                 event["user_id"],
-                reason,
+                event["event_type"],
+                event["device_type"],
+                event["ip"],
                 event["timestamp"]
             )
         )
 
-        conn.commit()
+        # FRAUD DETECTION
+        fraud, reason = is_fraud(event)
 
-    else:
-        print("✅ Normal event:", event)
+        if fraud:
+            print("🚨 FRAUD DETECTED:", reason)
+
+            cursor.execute(
+                """
+                INSERT INTO fraud_alerts (user_id, reason, timestamp)
+                VALUES (?, ?, ?)
+                """,
+                (
+                    event["user_id"],
+                    reason,
+                    event["timestamp"]
+                )
+            )
+        else:
+            print("✅ Normal event")
+
+        counter += 1
+
+        if counter >= 5:
+            conn.commit()
+            counter = 0
+
+    except Exception as e:
+        print("Error processing message:", e)
+        time.sleep(2)
