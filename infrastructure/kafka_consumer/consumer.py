@@ -1,11 +1,15 @@
 from config.settings import settings
-from kafka import KafkaConsumer
+from kafka import KafkaConsumer, KafkaProducer
 import sqlite3
 import json
 import time
 
 from infrastructure.fraud_detection.engine import is_fraud
 
+producer = KafkaProducer(
+    bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVER,
+    value_serializer=lambda v: json.dumps(v).encode("utf-8")
+)
 # ✅ Kafka connection retry
 consumer = None
 
@@ -111,3 +115,4 @@ while True:
     except Exception as e:
         print("❌ Error processing message:", e)
         time.sleep(2)
+
