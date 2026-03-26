@@ -44,3 +44,11 @@ services:
       - .env
     command: python infrastructure/kafka_consumer/consumer.py
     restart: always
+
+  fraud_alert:
+    build: .
+    depends_on:
+      - kafka
+    env_file:
+      - .env
+    command: python infrastructure/fraud_alert_service/alert_consumer.py
