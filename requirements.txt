@@ -1,0 +1,9 @@
+fastapi~=0.116.1
+uvicorn
+kafka-python
+psycopg2-binary
+pydantic~=2.11.7
+pydantic-settings
+python-dotenv
+config~=0.5.1
+requests~=2.32.5

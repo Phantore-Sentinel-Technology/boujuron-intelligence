@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+
+  kafka:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://kafka:9092
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+
+  ingestion:
+    build: .
+    container_name: event_ingestion
+    ports:
+      - "8000:8000"
+    depends_on:
+      - kafka
+    env_file:
+      - .env
+    command: uvicorn services.event_ingestion_service.main:app --host 0.0.0.0 --port 8000
+
+  consumer:
+    build: .
+    depends_on:
+      - kafka
+    env_file:
+      - .env
+    command: python infrastructure/kafka_consumer/consumer.py
+    restart: always
+
+  fraud_alert:
+    build: .
+    depends_on:
+      - kafka
+    env_file:
+      - .env
+    command: python infrastructure/fraud_alert_service/alert_consumer.py
