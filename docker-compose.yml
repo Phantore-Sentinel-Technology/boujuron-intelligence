@@ -52,3 +52,9 @@ services:
     env_file:
       - .env
     command: python infrastructure/fraud_alert_service/alert_consumer.py
+
+  dashboard:
+    build: .
+    ports:
+      - "8001:8000"
+    command: uvicorn services.dashboard_service.main:app --host 0.0.0.0 --port 8000
