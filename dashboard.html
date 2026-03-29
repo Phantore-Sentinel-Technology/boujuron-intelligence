@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Phantore Sentinel Dashboard</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #0f172a;
+            color: #fff;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #38bdf8;
+        }
+
+        .card-container {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            flex: 1;
+            padding: 20px;
+            background: #1e293b;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .card h2 {
+            margin: 0;
+            font-size: 30px;
+        }
+
+        .high { color: #ef4444; }
+        .medium { color: #f59e0b; }
+        .low { color: #22c55e; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #1e293b;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+        }
+
+        th {
+            background: #334155;
+        }
+
+        tr:nth-child(even) {
+            background: #0f172a;
+        }
+
+        .badge {
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .badge.high { background: #7f1d1d; }
+        .badge.medium { background: #78350f; }
+        .badge.low { background: #14532d; }
+    </style>
+</head>
+
+<body>
+
+<h1>🚨 Phantore Sentinel Dashboard</h1>
+
+<div class="card-container">
+    <div class="card">
+        <h2 id="total">0</h2>
+        <p>Total Alerts</p>
+    </div>
+
+    <div class="card">
+        <h2 id="high">0</h2>
+        <p class="high">High Risk</p>
+    </div>
+
+    <div class="card">
+        <h2 id="medium">0</h2>
+        <p class="medium">Medium Risk</p>
+    </div>
+
+    <div class="card">
+        <h2 id="low">0</h2>
+        <p class="low">Low Risk</p>
+    </div>
+</div>
+
+<table>
+    <thead>
+    <tr>
+        <th>User ID</th>
+        <th>Reason</th>
+        <th>Risk Score</th>
+        <th>Risk Level</th>
+        <th>Timestamp</th>
+    </tr>
+    </thead>
+
+    <tbody id="table-body"></tbody>
+</table>
+
+<script>
+    const API_URL = "http://localhost:8001/fraud-alerts";
+
+    function getBadge(level) {
+        if (level === "HIGH") return '<span class="badge high">HIGH</span>';
+        if (level === "MEDIUM") return '<span class="badge medium">MEDIUM</span>';
+        return '<span class="badge low">LOW</span>';
+    }
+
+    async function loadData() {
+        try {
+            const res = await fetch(API_URL);
+            const data = await res.json();
+
+            const table = document.getElementById("table-body");
+
+            let high = 0, medium = 0, low = 0;
+
+            table.innerHTML = "";
+
+            data.forEach(alert => {
+                if (alert.risk_level === "HIGH") high++;
+                else if (alert.risk_level === "MEDIUM") medium++;
+                else low++;
+
+                const row = `
+        <tr>
+          <td>${alert.user_id}</td>
+          <td>${alert.reason}</td>
+          <td>${alert.risk_score}</td>
+          <td>${getBadge(alert.risk_level)}</td>
+          <td>${alert.timestamp}</td>
+        </tr>
+      `;
+
+                table.innerHTML += row;
+            });
+
+            document.getElementById("total").innerText = data.length;
+            document.getElementById("high").innerText = high;
+            document.getElementById("medium").innerText = medium;
+            document.getElementById("low").innerText = low;
+
+        } catch (err) {
+            console.error("Error loading data:", err);
+        }
+    }
+
+    // 🔁 Auto refresh every 3 seconds
+    setInterval(loadData, 3000);
+
+    // Initial load
+    loadData();
+</script>
+
+</body>
+</html>
