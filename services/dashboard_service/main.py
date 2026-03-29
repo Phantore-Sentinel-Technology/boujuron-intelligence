@@ -19,3 +19,5 @@ def get_fraud():
     cursor.execute("SELECT * FROM events ORDER BY id DESC LIMIT 50")
     rows = cursor.fetchall()
     return rows
+
+
