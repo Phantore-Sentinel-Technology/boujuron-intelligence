@@ -23,3 +23,11 @@ def calculate_risk_score(event, reason):
 
     # Normalize to 100
     return min(score, 100)
+
+
+def get_risk_level(score: int) -> str:
+    if score >= 85:
+        return "HIGH"
+    elif score >= 70:
+        return "MEDIUM"
+    return "LOW"
