@@ -7,8 +7,6 @@ import requests
 
 from infrastructure.fraud_detection.engine import is_fraud
 
-requests.post("http://dashboard:8000/internal/fraud", json=event)
-
 producer = KafkaProducer(
     bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVER,
     value_serializer=lambda v: json.dumps(v).encode("utf-8")
@@ -91,6 +89,19 @@ while True:
 
         # FRAUD DETECTION
         fraud, reason = is_fraud(event)
+        # ✅ Send to dashboard AFTER event exists
+        try:
+            requests.post(
+                "http://dashboard:8000/internal/fraud",
+                json={
+                    "event": event,
+                    "fraud": fraud,
+                    "reason": reason
+                },
+                timeout=2
+            )
+        except Exception as e:
+            print("⚠️ Dashboard service unavailable:", e)
 
         if fraud:
             print("🚨 FRAUD DETECTED:", reason)
@@ -118,4 +129,3 @@ while True:
     except Exception as e:
         print("❌ Error processing message:", e)
         time.sleep(2)
-
