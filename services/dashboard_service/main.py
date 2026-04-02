@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, WebSocket
 import sqlite3
 
 from services.dashboard_service.schemas import EventResponse, FraudAlertResponse
@@ -8,6 +8,19 @@ app = FastAPI(title="Phantore Sentinel Dashboard API")
 
 conn = sqlite3.connect("events.db", check_same_thread=False)
 cursor = conn.cursor()
+
+clients = []
+
+
+@app.websocket("/ws/fraud")
+async def ws_fraud(websocket: WebSocket):
+    await websocket.accept()
+    clients.append(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except:
+        clients.remove(websocket)
 
 
 # 🔹 GET EVENTS
