@@ -22,6 +22,12 @@ async def ws_fraud(websocket: WebSocket):
     except:
         clients.remove(websocket)
 
+@app.post("internal/fraud")
+async def push_fraud(event: dict):
+    for client in clients:
+        await client.send_json(event)
+    return {"status": "sent"}
+
 
 # 🔹 GET EVENTS
 @app.get("/events", response_model=list[EventResponse])
