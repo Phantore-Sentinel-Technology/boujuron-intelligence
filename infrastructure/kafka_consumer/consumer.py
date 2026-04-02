@@ -3,8 +3,11 @@ from kafka import KafkaConsumer, KafkaProducer
 import sqlite3
 import json
 import time
+import requests
 
 from infrastructure.fraud_detection.engine import is_fraud
+
+requests.post("http://dashboard:8000/internal/fraud", json=event)
 
 producer = KafkaProducer(
     bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVER,
