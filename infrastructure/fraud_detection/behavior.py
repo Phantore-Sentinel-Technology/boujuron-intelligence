@@ -1,19 +1,23 @@
 from collections import defaultdict
 
-# user profile storage (in memory for now)
+# Store user behavior profile
 user_profiles = defaultdict(lambda: {
-    "ips": set,
-    "device": set,
-    "event_count": 0
+    "devices": set(),
+    "ips": set(),
+    "avg_requests": 0,
+    "total_requests": 0
 })
 
 
 def update_profile(event):
     profile = user_profiles[event["user_id"]]
 
-    profile["ips"].add(event["ip"])
     profile["devices"].add(event["device_type"])
-    profile["event_count"] += 1
+    profile["ips"].add(event["ip"])
+    profile["total_requests"] += 1
+
+    # Update avg requests (simple moving avg)
+    profile["avg_requests"] = profile["total_requests"] / max(1, len(profile["devices"]))
 
     return profile
 
