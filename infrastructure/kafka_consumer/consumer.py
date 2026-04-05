@@ -50,7 +50,6 @@ def create_producer():
 consumer = create_consumer()
 producer = create_producer()
 
-
 # ================================
 # 🗄 DATABASE SETUP (ONCE)
 # ================================
@@ -97,7 +96,6 @@ CREATE TABLE IF NOT EXISTS ml_features (
 conn.commit()
 
 print("🚀 Consumer + AI Fraud Engine started...")
-
 
 # ================================
 # 🔄 MAIN PROCESSING LOOP
