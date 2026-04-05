@@ -95,3 +95,23 @@ def get_user_activity(user_id: str):
         "events": events,
         "fraud_alerts": frauds
     }
+
+@app.get("/ml-features")
+def get_features(limit: int = 50):
+    cursor.execute("""
+    SELECT user_id, num_devices, num_ips, total_requests, timestamp
+    FROM ml_features ORDER BY id DESC LIMIT ?
+    """, (limit,))
+
+    rows = cursor.fetchall()
+
+    return [
+        {
+            "user_id": r[0],
+            "num_devices": r[1],
+            "num_ips": r[2],
+            "total_requests": r[3],
+            "timestamp": r[4]
+        }
+        for r in rows
+    ]
