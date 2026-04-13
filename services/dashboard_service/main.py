@@ -1,9 +1,9 @@
-from fastapi import FastAPI, Query, WebSocket
 import psycopg2
+from fastapi import FastAPI, Query, WebSocket
 
 from config.settings import settings
-from services.dashboard_service.schemas import EventResponse, FraudAlertResponse
 from infrastructure.fraud_detection.scoring import calculate_risk_score, get_risk_level
+from services.dashboard_service.schemas import EventResponse, FraudAlertResponse
 
 app = FastAPI(title="Phantore Sentinel Dashboard API")
 
