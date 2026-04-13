@@ -9,7 +9,7 @@ from infrastructure.fraud_detection.engine import is_fraud
 from infrastructure.fraud_detection.behavior import update_profile
 from infrastructure.fraud_detection.anomaly import detect_anomaly
 from infrastructure.fraud_detection.features import extract_features
-
+from infrastructure.ml.inference import predict_fraud
 
 # ================================
 # 🔁 KAFKA CONNECTION (RETRY SAFE)
@@ -146,16 +146,28 @@ while True:
         # =========================
         # 🧠 FINAL AI SCORING
         # =========================
-        final_score = anomaly_score + (50 if fraud else 0)
+            # Extract ML features
+        features = extract_features(event, profile)
 
-        if final_score >= 80:
+        # ML prediction
+        ml_anomaly, ml_score = predict_fraud(features)
+
+        # Combine everything
+        rule_score = 50 if fraud else 0
+        anomaly_score_total = anomaly_score
+        ml_score_scaled = 50 if ml_anomaly else 0
+
+        final_score = rule_score + anomaly_score_total + ml_score_scaled
+
+        # Risk levels
+        if final_score >= 100:
             risk = "HIGH"
-        elif final_score >= 50:
+        elif final_score >= 60:
             risk = "MEDIUM"
         else:
             risk = "LOW"
 
-        print(f"🧠 Score: {final_score} | Risk: {risk}")
+        print(f"🧠 ML Score: {ml_score:.4f} | Final Score: {final_score} | Risk: {risk}")
 
         # =========================
         # 🤖 STORE ML FEATURES
