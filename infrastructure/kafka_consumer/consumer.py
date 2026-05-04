@@ -5,15 +5,10 @@ import json
 import time
 import requests
 
-from infrastructure.fraud_detection.engine import is_fraud
-from infrastructure.fraud_detection.behavior import update_profile
-from infrastructure.fraud_detection.anomaly import detect_anomaly
-from infrastructure.fraud_detection.features import extract_features
-from infrastructure.ml.inference import predict_fraud
 from infrastructure.risk_engine.engine import process_event
 
 # ================================
-# 🔁 KAFKA CONNECTION (RETRY SAFE)
+# 🔁 KAFKA CONNECTION
 # ================================
 
 def create_consumer():
@@ -30,7 +25,7 @@ def create_consumer():
             print("✅ Kafka Consumer Connected")
             return consumer
         except Exception:
-            print("❌ Kafka not ready, retrying in 5 seconds...")
+            print("❌ Kafka not ready, retrying...")
             time.sleep(5)
 
 
@@ -65,7 +60,7 @@ producer = create_producer()
 conn, cursor = create_db()
 
 # ================================
-# 🗄 TABLE SETUP
+# 🗄 TABLES
 # ================================
 
 cursor.execute("""
@@ -90,23 +85,9 @@ CREATE TABLE IF NOT EXISTS fraud_alerts (
 )
 """)
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS ml_features (
-    id SERIAL PRIMARY KEY,
-    user_id TEXT,
-    event_type TEXT,
-    device_type TEXT,
-    ip TEXT,
-    num_devices INTEGER,
-    num_ips INTEGER,
-    total_requests INTEGER,
-    timestamp TIMESTAMP
-)
-""")
-
 conn.commit()
 
-print("🚀 Consumer + AI Fraud Engine started...")
+print("🚀 Consumer + Risk Engine started...")
 
 # ================================
 # 🔄 MAIN LOOP
@@ -123,7 +104,9 @@ while True:
         event = msg.value
         print("📥 EVENT:", event)
 
-        # STORE EVENT
+        # =========================
+        # 📥 STORE RAW EVENT
+        # =========================
         cursor.execute("""
         INSERT INTO events (user_id, event_type, device_type, ip, timestamp)
         VALUES (%s, %s, %s, %s, %s)
@@ -135,92 +118,48 @@ while True:
             event["timestamp"]
         ))
 
-        # BEHAVIOR
-        profile = update_profile(event)
+        # =========================
+        # 🧠 PROCESS WITH RISK ENGINE
+        # =========================
+        result = process_event(event)
 
-        # ANOMALY
-        anomaly_score, anomaly_reasons = detect_anomaly(event, profile)
+        print("🧠 RESULT:", result)
 
-        # RULE
-        fraud, rule_reason = is_fraud(event)
-
-        # FEATURES
-        features = extract_features(event, profile)
-
-        # ML
-        ml_anomaly, ml_score = predict_fraud(features)
-
-        # SCORING
-        rule_score = 50 if fraud else 0
-        ml_score_scaled = 50 if ml_anomaly else 0
-
-        final_score = rule_score + anomaly_score + ml_score_scaled
-
-        if final_score >= 100:
-            risk = "HIGH"
-        elif final_score >= 60:
-            risk = "MEDIUM"
-        else:
-            risk = "LOW"
-
-        print(f"🧠 Score: {final_score} | Risk: {risk}")
-
-        # STORE FEATURES
-        cursor.execute("""
-        INSERT INTO ml_features (
-            user_id, event_type, device_type, ip,
-            num_devices, num_ips, total_requests, timestamp
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (
-            features["user_id"],
-            features["event_type"],
-            features["device_type"],
-            features["ip"],
-            features["num_devices"],
-            features["num_ips"],
-            features["total_requests"],
-            features["timestamp"]
-        ))
-
-        # FRAUD
-        if risk == "HIGH":
-            reason = ", ".join(anomaly_reasons) or rule_reason
+        # =========================
+        # 🚨 HANDLE FRAUD
+        # =========================
+        if result["risk_level"] == "HIGH":
 
             cursor.execute("""
             INSERT INTO fraud_alerts (user_id, reason, risk_level, risk_score, timestamp)
             VALUES (%s, %s, %s, %s, %s)
             """, (
-                event["user_id"],
-                reason,
-                risk,
-                final_score,
-                event["timestamp"]
+                result["user_id"],
+                ", ".join(result["reasons"]),
+                result["risk_level"],
+                result["risk_score"],
+                result["timestamp"]
             ))
 
-            producer.send("fraud_alerts", {
-                "user_id": event["user_id"],
-                "risk": risk,
-                "score": final_score,
-                "reason": reason,
-                "timestamp": event["timestamp"]
-            })
+            # 🔥 Send to Kafka fraud topic
+            producer.send("fraud_alerts", result)
 
+            # 🔥 Notify dashboard
             try:
                 requests.post(
                     "http://dashboard:8000/internal/fraud",
-                    json={
-                        "user_id": event["user_id"],
-                        "risk_level": risk,
-                        "risk_score": final_score,
-                        "reason": reason,
-                        "timestamp": event["timestamp"]
-                    },
+                    json=result,
                     timeout=2
                 )
             except Exception as e:
                 print("⚠️ Dashboard unavailable:", e)
 
+        else:
+            print("✅ Normal event")
+
+        # =========================
+        # 💾 COMMIT (BATCH)
+        # =========================
         counter += 1
         if counter >= 5:
             conn.commit()
