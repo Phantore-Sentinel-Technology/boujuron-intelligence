@@ -10,6 +10,7 @@ from infrastructure.fraud_detection.behavior import update_profile
 from infrastructure.fraud_detection.anomaly import detect_anomaly
 from infrastructure.fraud_detection.features import extract_features
 from infrastructure.ml.inference import predict_fraud
+from infrastructure.risk_engine.engine import process_event
 
 # ================================
 # 🔁 KAFKA CONNECTION (RETRY SAFE)
