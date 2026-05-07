@@ -17,3 +17,18 @@ def test_normal_event():
     assert "reasons" in result
 
     assert result["risk_level"] in ["LOW", "MEDIUM", "HIGH"]
+
+
+def test_suspicious_event():
+    event = {
+        "user_id": "user1",
+        "event_type": "login",
+        "device_type": "unknown_android",
+        "ip": "203.45.11.90",
+        "timestamp": "2026-05-04T02:00:00"
+    }
+
+    result = process_event(event)
+
+    assert result["risk_score"] >= 0
+    assert isinstance(result["reasons"], list)
