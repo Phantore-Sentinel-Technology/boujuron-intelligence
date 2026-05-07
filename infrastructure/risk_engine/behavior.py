@@ -1,12 +1,13 @@
 from collections import defaultdict
-from datetime import datetime
 
-user_profiles = defaultdict(lambda: {
-    "device": set(),
-    "ips": set(),
-    "events": [],
-    "last_seen": None
-})
+# In-memory behavior profiles
+user_profiles = defaultdict(
+    lambda: {
+        "devices": set(),
+        "ips": set(),
+        "total_requests": 0
+    }
+)
 
 
 def update_profile(event):
@@ -14,10 +15,17 @@ def update_profile(event):
 
     profile = user_profiles[user_id]
 
+    # Track device
     profile["devices"].add(event["device_type"])
-    profile["ips"].add(event["ips"])
 
-    profile["event"].append(event)
-    profile["last_seen"] = event("timestamp")
+    # Track IP
+    profile["ips"].add(event["ip"])
 
-    return profile
+    # Track request count
+    profile["total_requests"] += 1
+
+    return {
+        "known_devices": list(profile["devices"]),
+        "known_ips": list(profile["ips"]),
+        "total_requests": profile["total_requests"]
+    }
