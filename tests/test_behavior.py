@@ -11,9 +11,14 @@ def test_behavior_profile_creation():
 
     profile = update_profile(event)
 
-    assert "known_device" in profile
+    assert "known_devices" in profile
     assert "known_ips" in profile
     assert "total_requests" in profile
+
+    assert isinstance(profile["known_devices"], list)
+    assert isinstance(profile["known_ips"], list)
+
+    assert profile["total_requests"] == 1
 
 
 def test_behavior_profile_updates():
@@ -26,7 +31,7 @@ def test_behavior_profile_updates():
 
     profile = update_profile(event)
 
-    assert isinstance(profile["known_device"], list)
+    assert isinstance(profile["known_devices"], list)
     assert isinstance(profile["known_ips"], list)
 
-
+    assert profile["total_requests"] >= 1
