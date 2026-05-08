@@ -17,6 +17,6 @@ def calculate_risk(event: EventRequest):
     Output → risk score + explanation
     """
 
-    result = process_event(event.dict())
+    result = process_event(event.model_dump())
 
     return result
