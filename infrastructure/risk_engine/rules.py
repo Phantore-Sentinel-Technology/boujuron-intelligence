@@ -20,7 +20,7 @@ def check_rules(event, profile):
         reasons.append("New IP detected")
 
     # =========================
-    # TOO MANY REQUESTS
+    # HIGH REQUEST FREQUENCY
     # =========================
     if profile["total_requests"] > 10:
         score += 30
@@ -29,10 +29,13 @@ def check_rules(event, profile):
     # =========================
     # SUSPICIOUS LOGIN TIME
     # =========================
-    hour = datetime.fromisoformat(event["timestamp"]).hour
+    timestamp = event.get("timestamp")
 
-    if hour < 5:
-        score += 20
-        reasons.append("Suspicious login time")
+    if timestamp:
+        hour = datetime.fromisoformat(timestamp).hour
+
+        if hour < 5:
+            score += 20
+            reasons.append("Suspicious login time")
 
     return score, reasons
