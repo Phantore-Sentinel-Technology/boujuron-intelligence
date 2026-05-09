@@ -8,7 +8,7 @@ app = FastAPI()
 
 @app.get("/")
 def health():
-    return {"status": "Phantore Sentinel API is up and running!"}
+    return {"status": "Boujuron API is up and running!"}
 
 
 @app.post("/events")
