@@ -20,7 +20,7 @@ def create_consumer():
                 bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVER,
                 value_deserializer=lambda x: json.loads(x.decode("utf-8")),
                 auto_offset_reset="earliest",
-                group_id="phantore-group"
+                group_id="boujuron-group"
             )
             print("✅ Kafka Consumer Connected")
             return consumer
