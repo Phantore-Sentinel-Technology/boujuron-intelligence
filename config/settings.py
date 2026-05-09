@@ -5,7 +5,7 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # Application
-    APP_NAME: str = "Phantore Sentinel"
+    APP_NAME: str = "Boujuron"
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
 
