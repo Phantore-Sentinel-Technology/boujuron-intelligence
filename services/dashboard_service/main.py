@@ -5,7 +5,7 @@ from config.settings import settings
 from infrastructure.fraud_detection.scoring import calculate_risk_score, get_risk_level
 from services.dashboard_service.schemas import EventResponse, FraudAlertResponse
 
-app = FastAPI(title="Phantore Sentinel Dashboard API")
+app = FastAPI(title="Boujuron Dashboard API")
 
 conn = psycopg2.connect(settings.DATABASE_URL)
 cursor = conn.cursor()
