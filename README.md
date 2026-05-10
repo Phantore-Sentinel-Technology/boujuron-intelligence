@@ -1,6 +1,6 @@
-# Phantore Sentinel Application
+# Boujuron Intelligence
 
-**Phantore Sentinel** is a **Behavioral Risk Intelligence Platform** designed to help fintech companies, SaaS platforms, marketplaces, and API-driven services detect abnormal user behavior and potential fraud in real time.
+**Boujuron Intelligence** is a **Behavioral Risk Intelligence Platform** designed to help fintech companies, SaaS platforms, marketplaces, and API-driven services detect abnormal user behavior and potential fraud in real time.
 
 The platform processes user behavioral events, extracts meaningful signals, and applies anomaly detection models to identify suspicious activity before it becomes a security threat.
 
