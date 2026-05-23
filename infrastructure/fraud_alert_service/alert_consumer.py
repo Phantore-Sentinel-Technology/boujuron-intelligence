@@ -29,3 +29,5 @@ for message in consumer:
     print("⚠️ ALERT RECEIVED:", alert)
 
     send_alert(alert)
+
+    
