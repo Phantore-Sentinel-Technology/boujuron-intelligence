@@ -1,9 +1,13 @@
-version: '3.8'
+version: '3.9'
 
 services:
 
+  # =========================
+  # KAFKA / REDPANDA
+  # =========================
   kafka:
     image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: boujuron-kafka
     command:
       - redpanda
       - start
@@ -25,20 +29,58 @@ services:
       - "9092:9092"
       - "9644:9644"
 
+  # =========================
+  # POSTGRES
+  # =========================
+  postgres:
+    image: postgres:15
+    container_name: boujuron-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: boujuron
+    ports:
+      - "5432:5432"
+
+  # =========================
+  # EVENT INGESTION SERVICE
+  # =========================
   ingestion:
     build: .
-    container_name: event_ingestion
-    ports:
-      - "8000:8000"
+    container_name: boujuron-ingestion
     depends_on:
       - kafka
       - postgres
     env_file:
       - .env
+    ports:
+      - "8000:8000"
     command: uvicorn services.event_ingestion_service.main:app --host 0.0.0.0 --port 8000
+    restart: always
 
+  # =========================
+  # RISK ENGINE
+  # =========================
+  risk_engine:
+    build: .
+    container_name: boujuron-risk-engine
+    depends_on:
+      - kafka
+      - postgres
+    env_file:
+      - .env
+    ports:
+      - "8001:8000"
+    command: uvicorn services.risk_engine_service.main:app --host 0.0.0.0 --port 8000
+    restart: always
+
+  # =========================
+  # EVENT CONSUMER
+  # =========================
   consumer:
     build: .
+    container_name: boujuron-consumer
     depends_on:
       - kafka
       - postgres
@@ -47,43 +89,34 @@ services:
     command: python infrastructure/kafka_consumer/consumer.py
     restart: always
 
+  # =========================
+  # FRAUD ALERT SERVICE
+  # =========================
   fraud_alert:
+    ports:
+      - "8003:8000"
     build: .
+    container_name: boujuron-fraud-alert
     depends_on:
       - kafka
       - postgres
     env_file:
       - .env
     command: python infrastructure/fraud_alert_service/alert_consumer.py
+    restart: always
 
+  # =========================
+  # DASHBOARD API
+  # =========================
   dashboard:
     build: .
-    container_name: dashboard_service
-    ports:
-      - "8001:8000"
+    container_name: boujuron-dashboard
     depends_on:
       - kafka
       - postgres
     env_file:
       - .env
-    command: uvicorn services.dashboard_service.main:app --host 0.0.0.0 --port 8000
-
-  postgres:
-    image: postgres:15
-    container_name: postgres_db
-    environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin
-      POSTGRES_DB: sentinel
-    ports:
-      - "5432:5432"
-    restart: always
-
-  risk_engine:
-    build: .
-    container_name: risk_engine_service
     ports:
       - "8002:8000"
-    env_file:
-      - .env
-    command: uvicorn services.risk_engine_service.main:app --host 0.0.0.0 --port 8000
+    command: uvicorn services.dashboard_service.main:app --host 0.0.0.0 --port 8000
+    restart: always
