@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
 
+    # Services
+    RISK_ENGINE_API: str
+
     API_KEY: Optional[str] = None
 
 
