@@ -86,7 +86,7 @@ services:
       - postgres
     env_file:
       - .env
-    command: python infrastructure/kafka_consumer/consumer.py
+    command: python -u infrastructure/kafka_consumer/consumer.py
     restart: always
 
   # =========================

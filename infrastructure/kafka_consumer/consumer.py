@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS fraud_alerts (
 
 conn.commit()
 
-print("🚀 Consumer + Risk Engine started...")
+print("🚀 Consumer + Risk Engine started...", flush=True)
 
 # ================================
 # 🔄 MAIN LOOP
@@ -102,7 +102,7 @@ for msg in consumer:
     try:
         event = msg.value
 
-        print("📥 EVENT:", event)
+        print("📥 EVENT:", event, flush=True)
 
         cursor.execute("""
 INSERT INTO events (
@@ -129,7 +129,7 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 
         result = process_event(event)
 
-        print("🧠 RESULT:", result)
+        print("🧠 RESULT:", result, flush=True)
 
         if result["risk_level"] == "HIGH":
 

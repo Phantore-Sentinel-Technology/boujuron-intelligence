@@ -313,7 +313,7 @@
 </div>
 
 <script>
-    const API_URL = "http://localhost:8003/fraud-alerts";
+    const API_URL = "http://localhost:8002/fraud-alerts";
 
     let riskChart, trendChart;
     let allData = [];
@@ -417,7 +417,7 @@
     });
 
     /* WEBSOCKET (REAL-TIME) */
-    const ws = new WebSocket("ws://localhost:8001/ws/fraud");
+    const ws = new WebSocket("ws://localhost:8002/ws/fraud");
 
     ws.onmessage = (event) => {
         const newAlert = JSON.parse(event.data);
