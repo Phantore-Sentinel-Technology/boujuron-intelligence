@@ -1,4 +1,5 @@
 import psycopg2
+import asyncio
 from fastapi import FastAPI, Query, WebSocket
 
 from config.settings import settings
@@ -8,10 +9,11 @@ from fastapi.responses import HTMLResponse
 from pathlib import Path
 app = FastAPI(title="Boujuron Dashboard API")
 
-conn = psycopg2.connect(settings.DATABASE_URL)
-cursor = conn.cursor()
-
 clients = []
+
+def get_db():
+    conn = psycopg2.connect(settings.DATABASE_URL)
+    return conn, conn.cursor()
 
 @app.get("/", response_class=HTMLResponse)
 def serve_dashboard():
@@ -22,12 +24,12 @@ def serve_dashboard():
 async def ws_fraud(websocket: WebSocket):
     await websocket.accept()
     clients.append(websocket)
+
     try:
         while True:
-            await websocket.receive_text()
+            await asyncio.sleep(1)
     except:
         clients.remove(websocket)
-
 
 @app.post("/internal/fraud")
 async def push_fraud(event: dict):
@@ -38,22 +40,31 @@ async def push_fraud(event: dict):
 
 @app.get("/events", response_model=list[EventResponse])
 def get_events(limit: int = Query(50)):
+    conn, cursor = get_db()
+
     cursor.execute("""
         SELECT user_id, event_type, device_type, ip, timestamp
         FROM events ORDER BY id DESC LIMIT %s
     """, (limit,))
+
     rows = cursor.fetchall()
+
+    conn.close()
 
     return [EventResponse(*row) for row in rows]
 
-
 @app.get("/fraud-alerts", response_model=list[FraudAlertResponse])
 def get_fraud(limit: int = Query(50)):
+    conn, cursor = get_db()
+
     cursor.execute("""
         SELECT user_id, reason, timestamp, risk_score, risk_level
         FROM fraud_alerts ORDER BY id DESC LIMIT %s
     """, (limit,))
+
     rows = cursor.fetchall()
+
+    conn.close()
 
     return [
         FraudAlertResponse(
@@ -66,31 +77,44 @@ def get_fraud(limit: int = Query(50)):
         for r in rows
     ]
 
-
 @app.get("/users/{user_id}/activity")
 def get_user_activity(user_id: str):
+    conn, cursor = get_db()
+
     cursor.execute("""
         SELECT user_id, event_type, device_type, ip, timestamp
         FROM events WHERE user_id = %s
     """, (user_id,))
+
     events = cursor.fetchall()
 
     cursor.execute("""
         SELECT user_id, reason, timestamp
         FROM fraud_alerts WHERE user_id = %s
     """, (user_id,))
+
     frauds = cursor.fetchall()
 
-    return {"events": events, "fraud_alerts": frauds}
+    conn.close()
+
+    return {
+        "events": events,
+        "fraud_alerts": frauds
+    }
 
 
 @app.get("/ml-features")
 def get_features(limit: int = 50):
+    conn, cursor = get_db()
+
     cursor.execute("""
         SELECT user_id, num_devices, num_ips, total_requests, timestamp
         FROM ml_features ORDER BY id DESC LIMIT %s
     """, (limit,))
+
     rows = cursor.fetchall()
+
+    conn.close()
 
     return [
         {
