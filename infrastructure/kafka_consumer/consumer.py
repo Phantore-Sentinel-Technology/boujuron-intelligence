@@ -66,7 +66,10 @@ conn, cursor = create_db()
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS events (
     id SERIAL PRIMARY KEY,
+    transaction_id TEXT,
     user_id TEXT,
+    amount NUMERIC,
+    location TEXT,
     event_type TEXT,
     device_type TEXT,
     ip TEXT,
@@ -95,39 +98,39 @@ print("🚀 Consumer + Risk Engine started...")
 
 counter = 0
 
-while True:
+for msg in consumer:
     try:
-        msg = consumer.poll(timeout_ms=1000)
-        if msg is None:
-            continue
-
         event = msg.value
+
         print("📥 EVENT:", event)
 
-        # =========================
-        # 📥 STORE RAW EVENT
-        # =========================
         cursor.execute("""
-        INSERT INTO events (user_id, event_type, device_type, ip, timestamp)
-        VALUES (%s, %s, %s, %s, %s)
-        """, (
-            event["user_id"],
-            event["event_type"],
-            event["device_type"],
-            event["ip"],
-            event["timestamp"]
-        ))
+INSERT INTO events (
+    transaction_id,
+    user_id,
+    amount,
+    location,
+    event_type,
+    device_type,
+    ip,
+    timestamp
+)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+""", (
+    event["transaction_id"],
+    event["user_id"],
+    event["amount"],
+    event["location"],
+    event["event_type"],
+    event["device_type"],
+    event["ip"],
+    event["timestamp"]
+))
 
-        # =========================
-        # 🧠 PROCESS WITH RISK ENGINE
-        # =========================
         result = process_event(event)
 
         print("🧠 RESULT:", result)
 
-        # =========================
-        # 🚨 HANDLE FRAUD
-        # =========================
         if result["risk_level"] == "HIGH":
 
             cursor.execute("""
@@ -141,10 +144,8 @@ while True:
                 result["timestamp"]
             ))
 
-            # 🔥 Send to Kafka fraud topic
             producer.send("fraud_alerts", result)
 
-            # 🔥 Notify dashboard
             try:
                 requests.post(
                     "http://dashboard:8000/internal/fraud",
@@ -157,13 +158,7 @@ while True:
         else:
             print("✅ Normal event")
 
-        # =========================
-        # 💾 COMMIT (BATCH)
-        # =========================
-        counter += 1
-        if counter >= 5:
-            conn.commit()
-            counter = 0
+        conn.commit()
 
     except Exception as e:
         print("❌ Error:", e)
