@@ -2,7 +2,7 @@ from kafka import KafkaConsumer
 import json
 import time
 from config.settings import settings
-from .notifier import send_alert
+from infrastructure.fraud_alert_service.notifier import send_alert
 
 consumer = None
 
