@@ -55,7 +55,7 @@ services:
     env_file:
       - .env
     ports:
-      - "8000:8000"
+    - "8000:8000"
     command: uvicorn services.event_ingestion_service.main:app --host 0.0.0.0 --port 8000
     restart: always
 
@@ -71,7 +71,7 @@ services:
     env_file:
       - .env
     ports:
-      - "8001:8000"
+    - "8001:8000"
     command: uvicorn services.risk_engine_service.main:app --host 0.0.0.0 --port 8000
     restart: always
 
@@ -93,8 +93,6 @@ services:
   # FRAUD ALERT SERVICE
   # =========================
   fraud_alert:
-    ports:
-      - "8003:8000"
     build: .
     container_name: boujuron-fraud-alert
     depends_on:
@@ -102,6 +100,8 @@ services:
       - postgres
     env_file:
       - .env
+    ports:
+    - "8003:8000"
     command: python infrastructure/fraud_alert_service/alert_consumer.py
     restart: always
 
