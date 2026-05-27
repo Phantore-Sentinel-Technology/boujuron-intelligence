@@ -4,7 +4,8 @@ from fastapi import FastAPI, Query, WebSocket
 from config.settings import settings
 from infrastructure.fraud_detection.scoring import calculate_risk_score, get_risk_level
 from services.dashboard_service.schemas import EventResponse, FraudAlertResponse
-
+from fastapi.responses import HTMLResponse
+from pathlib import Path
 app = FastAPI(title="Boujuron Dashboard API")
 
 conn = psycopg2.connect(settings.DATABASE_URL)
@@ -12,6 +13,10 @@ cursor = conn.cursor()
 
 clients = []
 
+@app.get("/", response_class=HTMLResponse)
+def serve_dashboard():
+    html_path = Path("dashboard.html")  # since it's in project root
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
 @app.websocket("/ws/fraud")
 async def ws_fraud(websocket: WebSocket):
