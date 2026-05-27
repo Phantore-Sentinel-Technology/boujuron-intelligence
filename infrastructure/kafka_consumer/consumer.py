@@ -156,10 +156,10 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 print("⚠️ Dashboard unavailable:", e)
 
         else:
-            print("✅ Normal event")
+            print("✅ Normal event", flush=True)
 
         conn.commit()
 
     except Exception as e:
-        print("❌ Error:", e)
+        print("❌ Error:", e, flush=True)
         time.sleep(2)
