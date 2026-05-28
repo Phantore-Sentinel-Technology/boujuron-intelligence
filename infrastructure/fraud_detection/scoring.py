@@ -7,9 +7,9 @@ def calculate_risk_score(event, reason):
     # Base scoring
     if reason == "too many requests":
         score += 40
-    elif reason == "multiple Ips detected":
+    elif reason == "Multiple IPs detected":
         score += 30
-    elif reason == "multiple device detected":
+    elif reason == "Multiple devices detected":
         score += 30
 
     # Time base risk

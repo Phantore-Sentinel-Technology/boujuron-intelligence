@@ -4,7 +4,8 @@ import psycopg2
 import json
 import time
 import requests
-from infrastructure.risk_engine.engine import process_event
+from infrastructure.fraud_detection.engine import is_fraud
+from infrastructure.fraud_detection.scoring import calculate_risk_score, get_risk_level
 
 # ==================================================
 # KAFKA CONNECTION
@@ -175,7 +176,26 @@ for msg in consumer:
         # PROCESS RISK ENGINE
         # ==========================================
 
-        result = process_event(event)
+        is_fraud_flag, reason, score = is_fraud(event)
+
+        if is_fraud_flag:
+            risk_level = get_risk_level(score)
+
+            result = {
+                "user_id": event["user_id"],
+                "risk_score": score,
+                "risk_level": risk_level,
+                "reasons": [reason],
+                "timestamp": event["timestamp"]
+            }
+        else:
+            result = {
+                "user_id": event["user_id"],
+                "risk_score": 0,
+                "risk_level": "LOW",
+                "reasons": ["Normal behavior"],
+                "timestamp": event["timestamp"]
+            }
 
         print(f"🧠 Risk Result: {result}")
 
