@@ -4,28 +4,31 @@ import psycopg2
 import json
 import time
 import requests
-
 from infrastructure.risk_engine.engine import process_event
 
-# ================================
-# 🔁 KAFKA CONNECTION
-# ================================
+# ==================================================
+# KAFKA CONNECTION
+# ==================================================
 
 def create_consumer():
     while True:
         try:
             print(f"Connecting to Kafka at {settings.KAFKA_BOOTSTRAP_SERVER}...")
+
             consumer = KafkaConsumer(
                 settings.KAFKA_TOPIC_EVENTS,
                 bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVER,
                 value_deserializer=lambda x: json.loads(x.decode("utf-8")),
-                auto_offset_reset="earliest",
+                auto_offset_reset="latest",
+                enable_auto_commit=True,
                 group_id="boujuron-group"
             )
+
             print("✅ Kafka Consumer Connected")
             return consumer
-        except Exception:
-            print("❌ Kafka not ready, retrying...")
+
+        except Exception as e:
+            print(f"❌ Kafka Consumer Error: {e}")
             time.sleep(5)
 
 
@@ -36,22 +39,33 @@ def create_producer():
                 bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVER,
                 value_serializer=lambda v: json.dumps(v).encode("utf-8")
             )
+
             print("✅ Kafka Producer Connected")
             return producer
-        except Exception:
-            print("❌ Kafka producer retrying...")
+
+        except Exception as e:
+            print(f"❌ Kafka Producer Error: {e}")
             time.sleep(5)
 
+
+# ==================================================
+# DATABASE CONNECTION
+# ==================================================
 
 def create_db():
     while True:
         try:
             print("Connecting to PostgreSQL...")
+
             conn = psycopg2.connect(settings.DATABASE_URL)
+            cursor = conn.cursor()
+
             print("✅ PostgreSQL Connected")
-            return conn, conn.cursor()
-        except Exception:
-            print("❌ Postgres not ready, retrying...")
+
+            return conn, cursor
+
+        except Exception as e:
+            print(f"❌ PostgreSQL Error: {e}")
             time.sleep(5)
 
 
@@ -59,9 +73,9 @@ consumer = create_consumer()
 producer = create_producer()
 conn, cursor = create_db()
 
-# ================================
-# 🗄 TABLES
-# ================================
+# ==================================================
+# CREATE TABLES
+# ==================================================
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS events (
@@ -90,76 +104,137 @@ CREATE TABLE IF NOT EXISTS fraud_alerts (
 
 conn.commit()
 
-print("🚀 Consumer + Risk Engine started...", flush=True)
+print("🚀 Consumer + Risk Engine Started")
 
-# ================================
-# 🔄 MAIN LOOP
-# ================================
+# ==================================================
+# SAFE FIELD EXTRACTION
+# ==================================================
 
-counter = 0
+def normalize_event(event):
+
+    return {
+        "transaction_id": event.get("transaction_id", "N/A"),
+        "user_id": event.get("user_id", "unknown_user"),
+        "amount": event.get("amount", 0),
+        "location": event.get("location", "unknown"),
+        "event_type": event.get("event_type", "unknown"),
+        "device_type": event.get("device_type", "unknown"),
+        "ip": event.get("ip", "0.0.0.0"),
+        "timestamp": event.get("timestamp")
+    }
+
+
+# ==================================================
+# MAIN LOOP
+# ==================================================
 
 for msg in consumer:
-    try:
-        event = msg.value
 
-        print("📥 EVENT:", event, flush=True)
+    try:
+
+        raw_event = msg.value
+
+        print(f"\n📥 RAW EVENT: {raw_event}")
+
+        event = normalize_event(raw_event)
+
+        print(f"✅ NORMALIZED EVENT: {event}")
+
+        # ==========================================
+        # SAVE EVENT
+        # ==========================================
 
         cursor.execute("""
-INSERT INTO events (
-    transaction_id,
-    user_id,
-    amount,
-    location,
-    event_type,
-    device_type,
-    ip,
-    timestamp
-)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-""", (
-    event["transaction_id"],
-    event["user_id"],
-    event["amount"],
-    event["location"],
-    event["event_type"],
-    event["device_type"],
-    event["ip"],
-    event["timestamp"]
-))
-
-        result = process_event(event)
-
-        print("🧠 RESULT:", result, flush=True)
-
-        if result["risk_level"] == "HIGH":
-
-            cursor.execute("""
-            INSERT INTO fraud_alerts (user_id, reason, risk_level, risk_score, timestamp)
-            VALUES (%s, %s, %s, %s, %s)
-            """, (
-                result["user_id"],
-                ", ".join(result["reasons"]),
-                result["risk_level"],
-                result["risk_score"],
-                result["timestamp"]
-            ))
-
-            producer.send("fraud_alerts", result)
-
-            try:
-                requests.post(
-                    "http://dashboard:8000/internal/fraud",
-                    json=result,
-                    timeout=2
-                )
-            except Exception as e:
-                print("⚠️ Dashboard unavailable:", e)
-
-        else:
-            print("✅ Normal event", flush=True)
+        INSERT INTO events (
+            transaction_id,
+            user_id,
+            amount,
+            location,
+            event_type,
+            device_type,
+            ip,
+            timestamp
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            event["transaction_id"],
+            event["user_id"],
+            event["amount"],
+            event["location"],
+            event["event_type"],
+            event["device_type"],
+            event["ip"],
+            event["timestamp"]
+        ))
 
         conn.commit()
 
+        print("✅ Event saved to PostgreSQL")
+
+        # ==========================================
+        # PROCESS RISK ENGINE
+        # ==========================================
+
+        result = process_event(event)
+
+        print(f"🧠 Risk Result: {result}")
+
+        # ==========================================
+        # HANDLE FRAUD ALERTS
+        # ==========================================
+
+        if result.get("risk_level") == "HIGH":
+
+            cursor.execute("""
+            INSERT INTO fraud_alerts (
+                user_id,
+                reason,
+                risk_level,
+                risk_score,
+                timestamp
+            )
+            VALUES (%s, %s, %s, %s, %s)
+            """, (
+                result.get("user_id"),
+                ", ".join(result.get("reasons", [])),
+                result.get("risk_level"),
+                result.get("risk_score"),
+                result.get("timestamp")
+            ))
+
+            conn.commit()
+
+            print("🚨 Fraud alert saved")
+
+            producer.send("fraud_alerts", result)
+
+            # ======================================
+            # SEND TO DASHBOARD
+            # ======================================
+
+            try:
+
+                response = requests.post(
+                    "http://dashboard:8000/internal/fraud",
+                    json=result,
+                    timeout=5
+                )
+
+                print(f"📡 Dashboard Response: {response.status_code}")
+
+            except Exception as dashboard_error:
+                print(f"⚠️ Dashboard Error: {dashboard_error}")
+
+        else:
+            print("✅ Normal Event")
+
     except Exception as e:
-        print("❌ Error:", e, flush=True)
+
+        print(f"❌ MAIN LOOP ERROR: {e}")
+
+        try:
+            conn.rollback()
+        except:
+            pass
+
         time.sleep(2)
