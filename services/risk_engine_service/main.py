@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import List
 from datetime import datetime
 
-from services.risk_engine_service.engine import process_event
+from services.risk_engine_service.engine import analyze_event
 
 app = FastAPI()
 
@@ -39,7 +39,7 @@ def home():
 @app.post("/risk-score")
 async def risk_score(event: Event):
 
-    result = process_event(event.model_dump())
+    result = analyze_event(event.model_dump())
 
     alert = {
         "user_id": event.user_id,
@@ -49,10 +49,8 @@ async def risk_score(event: Event):
         "timestamp": event.timestamp
     }
 
-    # SAVE ALERT
     fraud_alerts.insert(0, alert)
 
-    # SEND TO WEBSOCKET CLIENTS
     disconnected = []
 
     for connection in connections:
@@ -65,7 +63,6 @@ async def risk_score(event: Event):
         connections.remove(dc)
 
     return result
-
 
 # =========================
 # GET ALERTS
