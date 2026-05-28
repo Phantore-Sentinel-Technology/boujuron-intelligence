@@ -205,11 +205,18 @@
 
         canvas {
             width: 100% !important;
+            height: 350px !important;
+
             background: rgba(15, 23, 42, 0.78);
+
             border: 1px solid rgba(148, 163, 184, 0.15);
+
             padding: 20px;
+
             border-radius: 18px;
+
             backdrop-filter: blur(14px);
+
             box-shadow:
                     0 10px 25px rgba(0,0,0,0.25);
         }
@@ -366,39 +373,160 @@
     }
 
     /* CHARTS */
-    function updateCharts(data, high, medium, low) {
+function updateCharts(data, high, medium, low) {
 
-        // Risk Pie
-        if (riskChart) riskChart.destroy();
-        riskChart = new Chart(document.getElementById("riskChart"), {
-            type: "pie",
-            data: {
-                labels: ["High", "Medium", "Low"],
-                datasets: [{
-                    data: [high, medium, low]
-                }]
+// Destroy old charts
+if (riskChart) riskChart.destroy();
+if (trendChart) trendChart.destroy();
+
+// =========================
+// RISK DONUT CHART
+// =========================
+
+riskChart = new Chart(document.getElementById("riskChart"), {
+    type: "doughnut",
+
+    data: {
+        labels: ["High", "Medium", "Low"],
+
+        datasets: [{
+            data: [high, medium, low],
+
+            backgroundColor: [
+                "#ef4444", // red
+                "#f59e0b", // amber
+                "#22c55e"  // green
+            ],
+
+            borderColor: "#0f172a",
+            borderWidth: 4,
+            hoverOffset: 10
+        }]
+    },
+
+    options: {
+
+        responsive: true,
+
+        maintainAspectRatio: false,
+
+        cutout: "72%",
+
+        plugins: {
+
+            legend: {
+                position: "top",
+
+                labels: {
+                    color: "#cbd5e1",
+                    padding: 20,
+                    font: {
+                        size: 13
+                    }
+                }
+            },
+
+            title: {
+                display: true,
+                text: "Risk Distribution",
+                color: "#f8fafc",
+                font: {
+                    size: 18,
+                    weight: "bold"
+                },
+                padding: {
+                    bottom: 20
+                }
             }
-        });
-
-        // Trend (alerts over time)
-        const counts = {};
-        data.forEach(a => {
-            const time = a.timestamp.slice(11,16);
-            counts[time] = (counts[time] || 0) + 1;
-        });
-
-        if (trendChart) trendChart.destroy();
-        trendChart = new Chart(document.getElementById("trendChart"), {
-            type: "line",
-            data: {
-                labels: Object.keys(counts),
-                datasets: [{
-                    label: "Fraud Events",
-                    data: Object.values(counts)
-                }]
-            }
-        });
+        }
     }
+});
+
+// =========================
+// TREND LINE CHART
+// =========================
+
+const counts = {};
+
+data.forEach(a => {
+    const time = a.timestamp.slice(11,16);
+    counts[time] = (counts[time] || 0) + 1;
+});
+
+trendChart = new Chart(document.getElementById("trendChart"), {
+
+    type: "line",
+
+    data: {
+        labels: Object.keys(counts),
+
+        datasets: [{
+            label: "Fraud Events",
+            data: Object.values(counts),
+
+            borderColor: "#38bdf8",
+            backgroundColor: "rgba(56, 189, 248, 0.15)",
+
+            tension: 0.4,
+
+            fill: true,
+
+            pointRadius: 5,
+
+            pointBackgroundColor: "#38bdf8"
+        }]
+    },
+
+    options: {
+
+        responsive: true,
+
+        maintainAspectRatio: false,
+
+        plugins: {
+
+            legend: {
+                labels: {
+                    color: "#cbd5e1"
+                }
+            },
+
+            title: {
+                display: true,
+                text: "Fraud Activity Timeline",
+                color: "#f8fafc",
+                font: {
+                    size: 18,
+                    weight: "bold"
+                }
+            }
+        },
+
+        scales: {
+
+            x: {
+                ticks: {
+                    color: "#94a3b8"
+                },
+
+                grid: {
+                    color: "rgba(148,163,184,0.08)"
+                }
+            },
+
+            y: {
+                ticks: {
+                    color: "#94a3b8"
+                },
+
+                grid: {
+                    color: "rgba(148,163,184,0.08)"
+                }
+            }
+        }
+    }
+});
+}
 
     /* FETCH */
     async function load() {
