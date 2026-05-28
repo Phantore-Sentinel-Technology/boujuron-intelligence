@@ -7,6 +7,7 @@ import requests
 
 from infrastructure.fraud_detection.scoring import (
     calculate_risk_score,
+    get_risk_reasons,
     get_risk_level
 )
 
@@ -179,20 +180,7 @@ for msg in consumer:
         score = calculate_risk_score(event, reason="multi-factor analysis")
         risk_level = get_risk_level(score)
 
-        # simple dynamic reason mapping (optional improvement)
-        reasons = []
-
-        if event["amount"] > 500000:
-            reasons.append("High transaction amount")
-
-        if event["device_type"] in ["unknown", "emulator", "rooted device"]:
-            reasons.append("Suspicious device")
-
-        if event["ip"] in ["45.90.12.10", "203.45.11.90"]:
-            reasons.append("Blacklisted IP")
-
-        if not reasons:
-            reasons = ["Normal behavior"]
+        reasons = get_risk_reasons(event)
 
         result = {
             "user_id": event["user_id"],
