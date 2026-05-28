@@ -70,13 +70,14 @@ def _velocity_score(profile, event_time):
         if (event_time - t).total_seconds() <= VELOCITY_WINDOW_SECONDS
     ]
     events_per_minute = len(recent_events) + 1
+    score = min(events_per_minute * 10, 50)
 
     if events_per_minute >= 20:
-        return 40, ["Extreme event velocity"], events_per_minute
+        return score, ["Extreme event velocity"], events_per_minute
     if events_per_minute >= 10:
-        return 25, ["High event velocity"], events_per_minute
+        return score, ["High event velocity"], events_per_minute
     if events_per_minute >= 5:
-        return 10, ["Elevated event velocity"], events_per_minute
+        return score, ["Elevated event velocity"], events_per_minute
 
     return 0, [], events_per_minute
 

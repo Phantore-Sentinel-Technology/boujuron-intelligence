@@ -174,6 +174,12 @@
             min-width: 85px;
         }
 
+        .critical {
+            background: rgba(220, 38, 38, 0.24);
+            color: #fecaca;
+            border: 1px solid rgba(220, 38, 38, 0.55);
+        }
+
         .high {
             background: rgba(239, 68, 68, 0.18);
             color: #fca5a5;
@@ -285,6 +291,7 @@
     <input type="text" id="userFilter" placeholder="Filter by User ID">
     <select id="riskFilter">
         <option value="">All Risk</option>
+        <option value="CRITICAL">CRITICAL</option>
         <option value="HIGH">HIGH</option>
         <option value="MEDIUM">MEDIUM</option>
         <option value="LOW">LOW</option>
@@ -294,6 +301,7 @@
 <!-- STATS -->
 <div class="card-container">
     <div class="card"><h2 id="total">0</h2><p>Total</p></div>
+    <div class="card"><h2 id="critical">0</h2><p>Critical</p></div>
     <div class="card"><h2 id="high">0</h2><p>High</p></div>
     <div class="card"><h2 id="medium">0</h2><p>Medium</p></div>
     <div class="card"><h2 id="low">0</h2><p>Low</p></div>
@@ -346,10 +354,11 @@
         const table = document.getElementById("table-body");
         table.innerHTML = "";
 
-        let high=0, medium=0, low=0;
+        let critical=0, high=0, medium=0, low=0;
 
         data.forEach(a => {
-            if (a.risk_level === "HIGH") high++;
+            if (a.risk_level === "CRITICAL") critical++;
+            else if (a.risk_level === "HIGH") high++;
             else if (a.risk_level === "MEDIUM") medium++;
             else low++;
 
@@ -365,15 +374,16 @@
         });
 
         document.getElementById("total").innerText = data.length;
+        document.getElementById("critical").innerText = critical;
         document.getElementById("high").innerText = high;
         document.getElementById("medium").innerText = medium;
         document.getElementById("low").innerText = low;
 
-        updateCharts(data, high, medium, low);
+        updateCharts(data, critical, high, medium, low);
     }
 
     /* CHARTS */
-function updateCharts(data, high, medium, low) {
+function updateCharts(data, critical, high, medium, low) {
 
 // Destroy old charts
 if (riskChart) riskChart.destroy();
@@ -387,12 +397,13 @@ riskChart = new Chart(document.getElementById("riskChart"), {
     type: "doughnut",
 
     data: {
-        labels: ["High", "Medium", "Low"],
+        labels: ["Critical", "High", "Medium", "Low"],
 
         datasets: [{
-            data: [high, medium, low],
+            data: [critical, high, medium, low],
 
             backgroundColor: [
+                "#dc2626", // critical red
                 "#ef4444", // red
                 "#f59e0b", // amber
                 "#22c55e"  // green

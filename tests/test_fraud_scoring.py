@@ -55,3 +55,11 @@ def test_blacklisted_ip_pushes_suspicious_login_to_high():
         "Blacklisted IP",
         "Unusual login time",
     ]
+
+
+def test_critical_risk_level_starts_at_ninety():
+    assert get_risk_level(39) == "LOW"
+    assert get_risk_level(40) == "MEDIUM"
+    assert get_risk_level(70) == "HIGH"
+    assert get_risk_level(90) == "CRITICAL"
+    assert get_risk_level(100) == "CRITICAL"

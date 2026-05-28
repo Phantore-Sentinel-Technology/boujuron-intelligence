@@ -47,8 +47,26 @@ def test_velocity_detection_scores_rapid_user_activity():
         )
 
     assert result["intelligence"]["events_per_minute"] == 5
-    assert result["intelligence"]["velocity_score"] == 10
+    assert result["intelligence"]["velocity_score"] == 50
     assert "Elevated event velocity" in result["reasons"]
+
+
+def test_velocity_detection_can_escalate_spam_to_critical():
+    result = None
+
+    for second in range(10):
+        result = ai_engine.analyze_event(
+            make_event(
+                "spam_user",
+                f"2026-05-28T12:00:{second:02d}",
+                event_type="failed_login",
+            )
+        )
+
+    assert result["risk_score"] == 95
+    assert result["risk_level"] == "CRITICAL"
+    assert result["intelligence"]["velocity_score"] == 50
+    assert "High event velocity" in result["reasons"]
 
 
 def test_user_history_anomaly_detects_profile_change():

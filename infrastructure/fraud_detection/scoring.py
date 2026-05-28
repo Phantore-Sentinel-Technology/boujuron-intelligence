@@ -92,8 +92,10 @@ def calculate_risk_score(event, reason=None):
 
 
 def get_risk_level(score: int) -> str:
+    if score >= 90:
+        return "CRITICAL"
     if score >= 70:
         return "HIGH"
-    if score >= 30:
+    if score >= 40:
         return "MEDIUM"
     return "LOW"
