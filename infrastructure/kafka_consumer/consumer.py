@@ -86,9 +86,15 @@ CREATE TABLE IF NOT EXISTS events (
     location TEXT,
     event_type TEXT,
     device_type TEXT,
+    network TEXT,
     ip TEXT,
     timestamp TIMESTAMP
 )
+""")
+
+cursor.execute("""
+    ALTER TABLE events
+    ADD COLUMN IF NOT EXISTS network TEXT
 """)
 
 cursor.execute("""
@@ -142,6 +148,7 @@ def normalize_event(event):
         "location": event.get("location", "unknown"),
         "event_type": event.get("event_type", "unknown"),
         "device_type": event.get("device_type", "unknown"),
+        "network": event.get("network", "NORMAL"),
         "ip": event.get("ip", "0.0.0.0"),
         "timestamp": event.get("timestamp")
     }
@@ -174,10 +181,11 @@ for msg in consumer:
                 location,
                 event_type,
                 device_type,
+                network,
                 ip,
                 timestamp
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             event["transaction_id"],
             event["user_id"],
@@ -185,6 +193,7 @@ for msg in consumer:
             event["location"],
             event["event_type"],
             event["device_type"],
+            event["network"],
             event["ip"],
             event["timestamp"]
         ))

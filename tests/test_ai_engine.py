@@ -108,3 +108,43 @@ def test_recent_high_risk_event_decays_into_later_score():
 
     assert result["intelligence"]["risk_decay_score"] > 0
     assert "Residual risk from recent activity" in result["reasons"]
+
+
+def test_high_risk_vpn_geo_payload_stays_high_for_new_user():
+    result = ai_engine.analyze_event(
+        make_event(
+            "high_risk_user",
+            "2026-05-28T21:30:00",
+            event_type="login",
+            device_type="unknown",
+            ip="45.90.12.10",
+            location="Russia",
+            network="VPN",
+            amount=250000,
+        )
+    )
+
+    assert result["risk_score"] == 85
+    assert result["risk_level"] == "HIGH"
+    assert "VPN network" in result["reasons"]
+    assert "Foreign/risky location" in result["reasons"]
+
+
+def test_high_risk_sensitive_emulator_payload_stays_high_for_new_user():
+    result = ai_engine.analyze_event(
+        make_event(
+            "high_risk_user_2",
+            "2026-05-28T20:10:00",
+            event_type="password_reset",
+            device_type="emulator",
+            ip="88.12.45.11",
+            location="Ukraine",
+            network="NORMAL",
+            amount=80000,
+        )
+    )
+
+    assert result["risk_score"] == 80
+    assert result["risk_level"] == "HIGH"
+    assert "Sensitive account activity" in result["reasons"]
+    assert "Foreign/risky location" in result["reasons"]

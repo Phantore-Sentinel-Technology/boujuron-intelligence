@@ -63,3 +63,52 @@ def test_critical_risk_level_starts_at_ninety():
     assert get_risk_level(70) == "HIGH"
     assert get_risk_level(90) == "CRITICAL"
     assert get_risk_level(100) == "CRITICAL"
+
+
+def test_combined_vpn_geo_ip_payload_scores_high_not_critical():
+    event = {
+        "user_id": "high_risk_user",
+        "event_type": "login",
+        "device_type": "unknown",
+        "ip": "45.90.12.10",
+        "location": "Russia",
+        "network": "VPN",
+        "amount": 250000,
+        "timestamp": "2026-05-28T21:30:00",
+    }
+
+    score = calculate_risk_score(event)
+
+    assert score == 85
+    assert get_risk_level(score) == "HIGH"
+    assert get_risk_reasons(event) == [
+        "Medium-high transaction amount",
+        "Suspicious device",
+        "Blacklisted IP",
+        "Foreign/risky location",
+        "VPN network",
+    ]
+
+
+def test_sensitive_emulator_geo_payload_scores_high_not_medium():
+    event = {
+        "user_id": "high_risk_user_2",
+        "event_type": "password_reset",
+        "device_type": "emulator",
+        "ip": "88.12.45.11",
+        "location": "Ukraine",
+        "network": "NORMAL",
+        "amount": 80000,
+        "timestamp": "2026-05-28T20:10:00",
+    }
+
+    score = calculate_risk_score(event)
+
+    assert score == 80
+    assert get_risk_level(score) == "HIGH"
+    assert get_risk_reasons(event) == [
+        "Moderate transaction amount",
+        "Suspicious device",
+        "Foreign/risky location",
+        "Sensitive account activity",
+    ]
