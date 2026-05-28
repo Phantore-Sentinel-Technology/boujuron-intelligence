@@ -5,11 +5,7 @@ import json
 import time
 import requests
 
-from infrastructure.fraud_detection.scoring import (
-    calculate_risk_score,
-    get_risk_reasons,
-    get_risk_level
-)
+from infrastructure.fraud_detection.ai_engine import analyze_event
 
 # ==================================================
 # KAFKA CONNECTION
@@ -106,6 +102,30 @@ CREATE TABLE IF NOT EXISTS fraud_alerts (
 )
 """)
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS ml_features (
+    id SERIAL PRIMARY KEY,
+    user_id TEXT,
+    num_devices INTEGER,
+    num_ips INTEGER,
+    total_requests INTEGER,
+    events_per_minute INTEGER,
+    anomaly_score INTEGER,
+    ml_score INTEGER,
+    timestamp TIMESTAMP
+)
+""")
+
+for column_name, column_type in (
+    ("events_per_minute", "INTEGER"),
+    ("anomaly_score", "INTEGER"),
+    ("ml_score", "INTEGER"),
+):
+    cursor.execute(f"""
+        ALTER TABLE ml_features
+        ADD COLUMN IF NOT EXISTS {column_name} {column_type}
+    """)
+
 conn.commit()
 
 print("🚀 Consumer + Risk Engine Running")
@@ -174,21 +194,10 @@ for msg in consumer:
         print("✅ Event saved to PostgreSQL")
 
         # ==========================================
-        # 🔥 SINGLE SOURCE OF TRUTH (SCORING)
+        # AI FRAUD INTELLIGENCE ENGINE
         # ==========================================
 
-        score = calculate_risk_score(event, reason="multi-factor analysis")
-        risk_level = get_risk_level(score)
-
-        reasons = get_risk_reasons(event)
-
-        result = {
-            "user_id": event["user_id"],
-            "risk_score": score,
-            "risk_level": risk_level,
-            "reasons": reasons,
-            "timestamp": event["timestamp"]
-        }
+        result = analyze_event(event)
 
         print(f"🧠 Risk Result: {result}")
 
@@ -216,6 +225,36 @@ for msg in consumer:
         conn.commit()
 
         print("🚨 Fraud alert saved")
+
+        intelligence = result.get("intelligence", {})
+        profile = intelligence.get("profile", {})
+
+        cursor.execute("""
+            INSERT INTO ml_features (
+                user_id,
+                num_devices,
+                num_ips,
+                total_requests,
+                events_per_minute,
+                anomaly_score,
+                ml_score,
+                timestamp
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            result["user_id"],
+            profile.get("known_devices", 0),
+            profile.get("known_ips", 0),
+            profile.get("history_events", 0),
+            intelligence.get("events_per_minute", 0),
+            intelligence.get("anomaly_score", 0),
+            intelligence.get("ml_score", 0),
+            result["timestamp"]
+        ))
+
+        conn.commit()
+
+        print("🧬 ML features saved")
 
         # ======================================
         # SEND TO KAFKA
