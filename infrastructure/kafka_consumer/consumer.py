@@ -4,8 +4,11 @@ import psycopg2
 import json
 import time
 import requests
-from infrastructure.fraud_detection.engine import is_fraud
-from infrastructure.fraud_detection.scoring import calculate_risk_score, get_risk_level
+
+from infrastructure.fraud_detection.scoring import (
+    calculate_risk_score,
+    get_risk_level
+)
 
 # ==================================================
 # KAFKA CONNECTION
@@ -62,7 +65,6 @@ def create_db():
             cursor = conn.cursor()
 
             print("✅ PostgreSQL Connected")
-
             return conn, cursor
 
         except Exception as e:
@@ -75,7 +77,7 @@ producer = create_producer()
 conn, cursor = create_db()
 
 # ==================================================
-# CREATE TABLES
+# TABLES
 # ==================================================
 
 cursor.execute("""
@@ -105,18 +107,17 @@ CREATE TABLE IF NOT EXISTS fraud_alerts (
 
 conn.commit()
 
-print("🚀 Consumer + Risk Engine Started")
+print("🚀 Consumer + Risk Engine Running")
 
 # ==================================================
-# SAFE FIELD EXTRACTION
+# NORMALIZER
 # ==================================================
 
 def normalize_event(event):
-
     return {
         "transaction_id": event.get("transaction_id", "N/A"),
         "user_id": event.get("user_id", "unknown_user"),
-        "amount": event.get("amount", 0),
+        "amount": float(event.get("amount", 0)),
         "location": event.get("location", "unknown"),
         "event_type": event.get("event_type", "unknown"),
         "device_type": event.get("device_type", "unknown"),
@@ -126,13 +127,12 @@ def normalize_event(event):
 
 
 # ==================================================
-# MAIN LOOP
+# MAIN LOOP (FIXED LOGIC)
 # ==================================================
 
 for msg in consumer:
 
     try:
-
         raw_event = msg.value
 
         print(f"\n📥 RAW EVENT: {raw_event}")
@@ -146,17 +146,17 @@ for msg in consumer:
         # ==========================================
 
         cursor.execute("""
-        INSERT INTO events (
-            transaction_id,
-            user_id,
-            amount,
-            location,
-            event_type,
-            device_type,
-            ip,
-            timestamp
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO events (
+                transaction_id,
+                user_id,
+                amount,
+                location,
+                event_type,
+                device_type,
+                ip,
+                timestamp
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             event["transaction_id"],
             event["user_id"],
@@ -173,39 +173,42 @@ for msg in consumer:
         print("✅ Event saved to PostgreSQL")
 
         # ==========================================
-        # PROCESS RISK ENGINE
+        # 🔥 SINGLE SOURCE OF TRUTH (SCORING)
         # ==========================================
 
-        is_fraud_flag, reason, score = is_fraud(event)
+        score = calculate_risk_score(event, reason="multi-factor analysis")
+        risk_level = get_risk_level(score)
 
-        if is_fraud_flag:
-            risk_level = get_risk_level(score)
+        # simple dynamic reason mapping (optional improvement)
+        reasons = []
 
-            result = {
-                "user_id": event["user_id"],
-                "risk_score": score,
-                "risk_level": risk_level,
-                "reasons": [reason],
-                "timestamp": event["timestamp"]
-            }
-        else:
-            result = {
-                "user_id": event["user_id"],
-                "risk_score": 0,
-                "risk_level": "LOW",
-                "reasons": ["Normal behavior"],
-                "timestamp": event["timestamp"]
-            }
+        if event["amount"] > 500000:
+            reasons.append("High transaction amount")
+
+        if event["device_type"] in ["unknown", "emulator", "rooted device"]:
+            reasons.append("Suspicious device")
+
+        if event["ip"] in ["45.90.12.10", "203.45.11.90"]:
+            reasons.append("Blacklisted IP")
+
+        if not reasons:
+            reasons = ["Normal behavior"]
+
+        result = {
+            "user_id": event["user_id"],
+            "risk_score": score,
+            "risk_level": risk_level,
+            "reasons": reasons,
+            "timestamp": event["timestamp"]
+        }
 
         print(f"🧠 Risk Result: {result}")
 
         # ==========================================
-        # HANDLE FRAUD ALERTS
+        # SAVE FRAUD ALERTS
         # ==========================================
 
-        if result.get("risk_level") in ["LOW", "MEDIUM", "HIGH"]:
-
-            cursor.execute("""
+        cursor.execute("""
             INSERT INTO fraud_alerts (
                 user_id,
                 reason,
@@ -214,42 +217,41 @@ for msg in consumer:
                 timestamp
             )
             VALUES (%s, %s, %s, %s, %s)
-            """, (
-                result.get("user_id"),
-                ", ".join(result.get("reasons", [])),
-                result.get("risk_level"),
-                result.get("risk_score"),
-                result.get("timestamp")
-            ))
+        """, (
+            result["user_id"],
+            ", ".join(result["reasons"]),
+            result["risk_level"],
+            result["risk_score"],
+            result["timestamp"]
+        ))
 
-            conn.commit()
+        conn.commit()
 
-            print("🚨 Fraud alert saved")
+        print("🚨 Fraud alert saved")
 
-            producer.send("fraud_alerts", result)
+        # ======================================
+        # SEND TO KAFKA
+        # ======================================
 
-            # ======================================
-            # SEND TO DASHBOARD
-            # ======================================
+        producer.send("fraud_alerts", result)
 
-            try:
+        # ======================================
+        # SEND TO DASHBOARD
+        # ======================================
 
-                response = requests.post(
-                    "http://dashboard:8000/internal/fraud",
-                    json=result,
-                    timeout=5
-                )
+        try:
+            response = requests.post(
+                "http://dashboard:8000/internal/fraud",
+                json=result,
+                timeout=5
+            )
 
-                print(f"📡 Dashboard Response: {response.status_code}")
+            print(f"📡 Dashboard Response: {response.status_code}")
 
-            except Exception as dashboard_error:
-                print(f"⚠️ Dashboard Error: {dashboard_error}")
-
-        else:
-            print("✅ Normal Event")
+        except Exception as dashboard_error:
+            print(f"⚠️ Dashboard Error: {dashboard_error}")
 
     except Exception as e:
-
         print(f"❌ MAIN LOOP ERROR: {e}")
 
         try:
