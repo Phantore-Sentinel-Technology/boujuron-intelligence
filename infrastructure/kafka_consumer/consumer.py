@@ -183,7 +183,7 @@ for msg in consumer:
         # HANDLE FRAUD ALERTS
         # ==========================================
 
-        if result.get("risk_level") == "HIGH":
+        if result.get("risk_level") in ["LOW", "MEDIUM", "HIGH"]:
 
             cursor.execute("""
             INSERT INTO fraud_alerts (
