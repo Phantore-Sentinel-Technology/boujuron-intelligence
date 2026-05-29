@@ -104,9 +104,24 @@ CREATE TABLE IF NOT EXISTS fraud_alerts (
     reason TEXT,
     risk_level TEXT,
     risk_score INTEGER,
+    recommended_action TEXT,
+    confidence NUMERIC,
+    signals_triggered INTEGER,
+    behavioral_match BOOLEAN,
     timestamp TIMESTAMP
 )
 """)
+
+for column_name, column_type in (
+    ("recommended_action", "TEXT"),
+    ("confidence", "NUMERIC"),
+    ("signals_triggered", "INTEGER"),
+    ("behavioral_match", "BOOLEAN"),
+):
+    cursor.execute(f"""
+        ALTER TABLE fraud_alerts
+        ADD COLUMN IF NOT EXISTS {column_name} {column_type}
+    """)
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS ml_features (
@@ -220,14 +235,22 @@ for msg in consumer:
                 reason,
                 risk_level,
                 risk_score,
+                recommended_action,
+                confidence,
+                signals_triggered,
+                behavioral_match,
                 timestamp
             )
-            VALUES (%s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             result["user_id"],
             ", ".join(result["reasons"]),
             result["risk_level"],
             result["risk_score"],
+            result["recommended_action"],
+            result["confidence"],
+            result["signals_triggered"],
+            result["behavioral_match"],
             result["timestamp"]
         ))
 

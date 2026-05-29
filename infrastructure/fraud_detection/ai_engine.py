@@ -4,7 +4,12 @@ from datetime import datetime
 from math import exp
 from statistics import mean, pstdev
 
-from .scoring import calculate_risk_score, get_risk_level, get_risk_reasons
+from .scoring import (
+    calculate_risk_score,
+    get_recommended_action,
+    get_risk_level,
+    get_risk_reasons,
+)
 
 try:
     from sklearn.ensemble import IsolationForest
@@ -175,6 +180,16 @@ def _ml_score(features):
         return 0, [], "error"
 
 
+def _confidence(score, signals_triggered, ml_status):
+    confidence = 0.45 + (score / 100 * 0.4) + min(signals_triggered, 6) * 0.025
+    if ml_status == "anomaly":
+        confidence += 0.05
+    elif ml_status in {"warming_up", "unavailable"}:
+        confidence -= 0.05
+
+    return round(max(0.35, min(confidence, 0.99)), 2)
+
+
 def _update_profile(profile, event, event_time, final_score, features):
     decayed_memory = _decay(profile.risk_memory, profile.last_seen, event_time)
 
@@ -201,6 +216,8 @@ def analyze_event(event):
 
     rule_score = calculate_risk_score(event, reason="multi-factor analysis")
     rule_reasons = get_risk_reasons(event)
+    if rule_score < 20 and rule_reasons == ["Known device and consistent login behavior"]:
+        rule_reasons = []
 
     velocity_score, velocity_reasons, events_per_minute = _velocity_score(profile, event_time)
     anomaly_score, anomaly_reasons = _anomaly_score(profile, event, event_time)
@@ -236,15 +253,23 @@ def analyze_event(event):
     if risk_decay_score:
         reasons.append("Residual risk from recent activity")
 
+    behavioral_match = not anomaly_reasons and not fingerprint_reasons
+    signals_triggered = len(reasons)
+
     if not reasons:
-        reasons = ["Normal behavior"]
+        reasons = ["Behavior matches historical profile"]
 
     _update_profile(profile, event, event_time, score, features)
+    risk_level = get_risk_level(score)
 
     return {
         "user_id": user_id,
         "risk_score": score,
-        "risk_level": get_risk_level(score),
+        "risk_level": risk_level,
+        "recommended_action": get_recommended_action(risk_level),
+        "confidence": _confidence(score, signals_triggered, ml_status),
+        "signals_triggered": signals_triggered,
+        "behavioral_match": behavioral_match,
         "reasons": reasons,
         "timestamp": event.get("timestamp"),
         "intelligence": {

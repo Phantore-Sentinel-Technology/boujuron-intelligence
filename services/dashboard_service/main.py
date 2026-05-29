@@ -57,8 +57,30 @@ def get_events(limit: int = Query(50)):
 def get_fraud(limit: int = Query(50)):
     conn, cursor = get_db()
 
+    for column_name, column_type in (
+        ("recommended_action", "TEXT"),
+        ("confidence", "NUMERIC"),
+        ("signals_triggered", "INTEGER"),
+        ("behavioral_match", "BOOLEAN"),
+    ):
+        cursor.execute(f"""
+            ALTER TABLE fraud_alerts
+            ADD COLUMN IF NOT EXISTS {column_name} {column_type}
+        """)
+
+    conn.commit()
+
     cursor.execute("""
-        SELECT user_id, reason, timestamp, risk_score, risk_level
+        SELECT
+            user_id,
+            reason,
+            timestamp,
+            risk_score,
+            risk_level,
+            recommended_action,
+            confidence,
+            signals_triggered,
+            behavioral_match
         FROM fraud_alerts ORDER BY id DESC LIMIT %s
     """, (limit,))
 
@@ -72,7 +94,11 @@ def get_fraud(limit: int = Query(50)):
             reason=r[1],
             timestamp=str(r[2]),
             risk_score=str(r[3]),
-            risk_level=r[4]
+            risk_level=r[4],
+            recommended_action=r[5],
+            confidence=float(r[6]) if r[6] is not None else None,
+            signals_triggered=r[7],
+            behavioral_match=r[8]
         )
         for r in rows
     ]

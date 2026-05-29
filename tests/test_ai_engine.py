@@ -32,8 +32,10 @@ def test_ai_engine_keeps_rule_based_result_compatible():
 
     result = ai_engine.analyze_event(event)
 
-    assert result["risk_score"] == 80
+    assert 70 <= result["risk_score"] <= 89
     assert result["risk_level"] == "HIGH"
+    assert result["recommended_action"] == "BLOCK_AND_REVIEW"
+    assert 0.0 < result["confidence"] <= 1.0
     assert "Blacklisted IP" in result["reasons"]
     assert "intelligence" in result
 
@@ -63,8 +65,9 @@ def test_velocity_detection_can_escalate_spam_to_critical():
             )
         )
 
-    assert result["risk_score"] == 95
+    assert 90 <= result["risk_score"] <= 100
     assert result["risk_level"] == "CRITICAL"
+    assert result["recommended_action"] == "FREEZE_AND_ESCALATE"
     assert result["intelligence"]["velocity_score"] == 50
     assert "High event velocity" in result["reasons"]
 
@@ -124,8 +127,10 @@ def test_high_risk_vpn_geo_payload_stays_high_for_new_user():
         )
     )
 
-    assert result["risk_score"] == 85
+    assert 80 <= result["risk_score"] <= 89
     assert result["risk_level"] == "HIGH"
+    assert result["recommended_action"] == "BLOCK_AND_REVIEW"
+    assert result["signals_triggered"] >= 5
     assert "VPN network" in result["reasons"]
     assert "Foreign/risky location" in result["reasons"]
 
@@ -144,7 +149,9 @@ def test_high_risk_sensitive_emulator_payload_stays_high_for_new_user():
         )
     )
 
-    assert result["risk_score"] == 80
+    assert 70 <= result["risk_score"] <= 89
     assert result["risk_level"] == "HIGH"
+    assert result["recommended_action"] == "BLOCK_AND_REVIEW"
+    assert result["signals_triggered"] >= 4
     assert "Sensitive account activity" in result["reasons"]
     assert "Foreign/risky location" in result["reasons"]

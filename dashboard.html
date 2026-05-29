@@ -198,6 +198,17 @@
             border: 1px solid rgba(34, 197, 94, 0.35);
         }
 
+        .action {
+            color: #bfdbfe;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .confidence {
+            color: #cbd5e1;
+            font-variant-numeric: tabular-nums;
+        }
+
         /* =========================
            CHARTS
         ========================= */
@@ -315,6 +326,8 @@
         <th>Reason</th>
         <th>Score</th>
         <th>Risk</th>
+        <th>Action</th>
+        <th>Confidence</th>
         <th>Time</th>
     </tr>
     </thead>
@@ -336,6 +349,15 @@
     /* BADGE */
     function badge(level) {
         return `<span class="badge ${level.toLowerCase()}">${level}</span>`;
+    }
+
+    function formatAction(action) {
+        return (action || "REVIEW").replaceAll("_", " ");
+    }
+
+    function formatConfidence(confidence) {
+        if (confidence === null || confidence === undefined) return "N/A";
+        return `${Math.round(Number(confidence) * 100)}%`;
     }
 
     /* FILTER */
@@ -368,6 +390,8 @@
         <td>${a.reason}</td>
         <td>${a.risk_score}</td>
         <td>${badge(a.risk_level)}</td>
+        <td class="action">${formatAction(a.recommended_action)}</td>
+        <td class="confidence">${formatConfidence(a.confidence)}</td>
         <td>${a.timestamp}</td>
       </tr>
     `;

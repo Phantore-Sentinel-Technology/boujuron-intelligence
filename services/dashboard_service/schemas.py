@@ -15,4 +15,7 @@ class FraudAlertResponse(BaseModel):
     timestamp: str
     risk_score: str
     risk_level: str
-
+    recommended_action: str | None = None
+    confidence: float | None = None
+    signals_triggered: int | None = None
+    behavioral_match: bool | None = None

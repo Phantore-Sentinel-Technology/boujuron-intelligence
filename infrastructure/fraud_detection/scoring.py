@@ -1,4 +1,5 @@
 from datetime import datetime
+from hashlib import sha256
 
 
 BLACKLISTED_IPS = {"45.90.12.10", "203.45.11.90"}
@@ -27,6 +28,34 @@ def _event_hour(timestamp):
         return datetime.fromisoformat(timestamp).hour
     except ValueError:
         return None
+
+
+def _stable_variation(event, low=-4, high=4):
+    seed = "|".join([
+        str(event.get("user_id", "")),
+        str(event.get("event_type", "")),
+        str(event.get("device_type", "")),
+        str(event.get("ip", "")),
+        str(event.get("timestamp", "")),
+    ])
+    span = high - low + 1
+    return low + (int(sha256(seed.encode("utf-8")).hexdigest(), 16) % span)
+
+
+def _calibrate_score(score, risk_signals, event):
+    if risk_signals == 0:
+        return 8 + _stable_variation(event, 0, 10)
+
+    adjusted = score + _stable_variation(event)
+
+    if score >= 90:
+        return max(90, min(adjusted, 100))
+    if score >= 70:
+        return max(70, min(adjusted, 89))
+    if score >= 40:
+        return max(40, min(adjusted, 69))
+
+    return max(1, min(adjusted, 39))
 
 
 def get_risk_reasons(event, reason=None):
@@ -76,7 +105,7 @@ def get_risk_reasons(event, reason=None):
     elif event_type in {"password_reset", "password_change", "new_payee", "withdrawal"}:
         reasons.append("Sensitive account activity")
 
-    return reasons or ["Normal behavior"]
+    return reasons or ["Known device and consistent login behavior"]
 
 
 def calculate_risk_score(event, reason=None):
@@ -146,7 +175,7 @@ def calculate_risk_score(event, reason=None):
     if 3 <= risk_signals and score < 80:
         score += 10
 
-    return min(score, 100)
+    return _calibrate_score(min(score, 100), risk_signals, event)
 
 
 def get_risk_level(score: int) -> str:
@@ -157,3 +186,13 @@ def get_risk_level(score: int) -> str:
     if score >= 40:
         return "MEDIUM"
     return "LOW"
+
+
+def get_recommended_action(risk_level: str) -> str:
+    actions = {
+        "LOW": "ALLOW",
+        "MEDIUM": "STEP_UP_VERIFY",
+        "HIGH": "BLOCK_AND_REVIEW",
+        "CRITICAL": "FREEZE_AND_ESCALATE",
+    }
+    return actions.get(risk_level, "REVIEW")

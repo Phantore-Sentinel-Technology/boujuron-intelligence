@@ -16,9 +16,9 @@ def test_normal_login_stays_low():
 
     score = calculate_risk_score(event)
 
-    assert score == 0
+    assert 8 <= score <= 18
     assert get_risk_level(score) == "LOW"
-    assert get_risk_reasons(event) == ["Normal behavior"]
+    assert get_risk_reasons(event) == ["Known device and consistent login behavior"]
 
 
 def test_unknown_device_during_unusual_time_becomes_medium():
@@ -32,7 +32,7 @@ def test_unknown_device_during_unusual_time_becomes_medium():
 
     score = calculate_risk_score(event)
 
-    assert score == 45
+    assert 40 <= score <= 49
     assert get_risk_level(score) == "MEDIUM"
     assert get_risk_reasons(event) == ["Suspicious device", "Unusual login time"]
 
@@ -48,7 +48,7 @@ def test_blacklisted_ip_pushes_suspicious_login_to_high():
 
     score = calculate_risk_score(event)
 
-    assert score == 80
+    assert 70 <= score <= 89
     assert get_risk_level(score) == "HIGH"
     assert get_risk_reasons(event) == [
         "Suspicious device",
@@ -79,7 +79,7 @@ def test_combined_vpn_geo_ip_payload_scores_high_not_critical():
 
     score = calculate_risk_score(event)
 
-    assert score == 85
+    assert 80 <= score <= 89
     assert get_risk_level(score) == "HIGH"
     assert get_risk_reasons(event) == [
         "Medium-high transaction amount",
@@ -104,7 +104,7 @@ def test_sensitive_emulator_geo_payload_scores_high_not_medium():
 
     score = calculate_risk_score(event)
 
-    assert score == 80
+    assert 70 <= score <= 89
     assert get_risk_level(score) == "HIGH"
     assert get_risk_reasons(event) == [
         "Moderate transaction amount",
