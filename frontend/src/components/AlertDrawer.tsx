@@ -2,6 +2,8 @@ import { motion } from "framer-motion";
 import { ShieldAlert, X } from "lucide-react";
 import type { FraudAlert } from "../types";
 import { RiskBadge } from "./RiskBadge";
+import { ScoreBreakdown } from "./ScoreBreakdown";
+import { explainAlert, recommendedAction } from "../utils/risk";
 
 interface AlertDrawerProps {
   alert: FraudAlert;
@@ -39,7 +41,7 @@ export function AlertDrawer({ alert, onClose }: AlertDrawerProps) {
       <dl className="decision-grid">
         <div>
           <dt>Recommended action</dt>
-          <dd>{(alert.recommended_action || "REVIEW").replaceAll("_", " ")}</dd>
+          <dd>{recommendedAction(alert.risk_level, alert.recommended_action)}</dd>
         </div>
         <div>
           <dt>Confidence</dt>
@@ -64,6 +66,8 @@ export function AlertDrawer({ alert, onClose }: AlertDrawerProps) {
           </div>
         ))}
       </div>
+
+      <ScoreBreakdown items={explainAlert(alert)} total={Number(alert.risk_score || 0)} />
     </motion.aside>
   );
 }

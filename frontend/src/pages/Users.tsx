@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import type { FraudAlert } from "../types";
 import { RiskBadge } from "../components/RiskBadge";
 
@@ -26,14 +27,14 @@ export function Users({ alerts }: { alerts: FraudAlert[] }) {
       </div>
       <div className="user-grid">
         {users.map((user) => (
-          <div key={user.id} className="user-row">
+          <Link key={user.id} className="user-row" to={`/customers/${encodeURIComponent(user.id)}`}>
             <div>
               <strong>{user.id}</strong>
               <span>{user.alerts} alerts observed</span>
             </div>
             <span>{user.maxScore}</span>
             <RiskBadge level={user.level} />
-          </div>
+          </Link>
         ))}
         {users.length === 0 && <div className="empty-state">No behavioral profiles yet.</div>}
       </div>

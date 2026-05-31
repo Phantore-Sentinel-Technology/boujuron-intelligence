@@ -1,5 +1,32 @@
 from pydantic import BaseModel
 
+UserRole = str
+
+
+class AuthRegisterRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    role: UserRole = "Fraud Analyst"
+
+
+class AuthLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class AuthUserResponse(BaseModel):
+    id: int
+    name: str
+    email: str
+    role: UserRole
+
+
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: AuthUserResponse
+
 
 class EventResponse(BaseModel):
     user_id: str
@@ -19,3 +46,35 @@ class FraudAlertResponse(BaseModel):
     confidence: float | None = None
     signals_triggered: int | None = None
     behavioral_match: bool | None = None
+
+
+class ScoreBreakdownItem(BaseModel):
+    label: str
+    points: int
+    evidence: str
+
+
+class UserProfileEvent(BaseModel):
+    event_type: str
+    device_type: str
+    ip: str
+    location: str | None = None
+    network: str | None = None
+    amount: float | None = None
+    timestamp: str
+
+
+class UserProfileResponse(BaseModel):
+    user_id: str
+    current_risk: int
+    risk_level: str
+    risk_trend: str
+    known_devices: list[str]
+    new_devices: list[str]
+    known_locations: list[str]
+    current_location: str | None = None
+    ip_history: list[str]
+    behavioral_profile: dict[str, str]
+    recent_events: list[UserProfileEvent]
+    previous_investigations: list[FraudAlertResponse]
+    score_breakdown: list[ScoreBreakdownItem]
