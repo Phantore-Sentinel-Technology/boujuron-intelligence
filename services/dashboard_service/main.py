@@ -1,15 +1,20 @@
 import psycopg2
 import asyncio
 from fastapi import FastAPI, Query, WebSocket
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from config.settings import settings
 from infrastructure.fraud_detection.scoring import calculate_risk_score, get_risk_level
 from services.dashboard_service.schemas import EventResponse, FraudAlertResponse
-from fastapi.responses import HTMLResponse
 from pathlib import Path
 app = FastAPI(title="Boujuron Dashboard API")
 
 clients = []
+FRONTEND_DIST = Path("frontend/dist")
+
+if (FRONTEND_DIST / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
 
 def get_db():
     conn = psycopg2.connect(settings.DATABASE_URL)
@@ -17,7 +22,11 @@ def get_db():
 
 @app.get("/", response_class=HTMLResponse)
 def serve_dashboard():
-    html_path = Path("dashboard.html")  # since it's in project root
+    react_index = FRONTEND_DIST / "index.html"
+    if react_index.exists():
+        return FileResponse(react_index)
+
+    html_path = Path("dashboard.html")
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
 @app.websocket("/ws/fraud")
@@ -152,3 +161,13 @@ def get_features(limit: int = 50):
         }
         for r in rows
     ]
+
+
+@app.get("/{full_path:path}", response_class=HTMLResponse)
+def serve_react_routes(full_path: str):
+    react_index = FRONTEND_DIST / "index.html"
+    if react_index.exists():
+        return FileResponse(react_index)
+
+    html_path = Path("dashboard.html")
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
