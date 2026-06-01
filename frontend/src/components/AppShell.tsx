@@ -1,7 +1,8 @@
 import { NavLink } from "react-router-dom";
-import { Activity, Bell, Gauge, LayoutDashboard, LogOut, Settings, ShieldCheck, Users } from "lucide-react";
+import { Activity, Bell, Gauge, LayoutDashboard, LogOut, Moon, Settings, ShieldCheck, Sun, Users } from "lucide-react";
 import type { PropsWithChildren } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -17,6 +18,8 @@ interface AppShellProps extends PropsWithChildren {
 
 export function AppShell({ children, connection }: AppShellProps) {
   const { user, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
+  const ThemeIcon = theme === "dark" ? Moon : Sun;
 
   return (
     <div className="app-shell">
@@ -51,13 +54,19 @@ export function AppShell({ children, connection }: AppShellProps) {
           </div>
         </div>
 
+        <button className="sidebar-action" onClick={toggleTheme}>
+          <ThemeIcon size={16} />
+          {theme === "dark" ? "Dark mode" : "Light mode"}
+        </button>
+
         <div className="user-chip">
           <div>
             <strong>{user?.name}</strong>
             <span>{user?.role}</span>
           </div>
-          <button className="icon-button" onClick={logout} aria-label="Sign out">
+          <button className="signout-button" onClick={logout}>
             <LogOut size={16} />
+            Sign out
           </button>
         </div>
       </aside>

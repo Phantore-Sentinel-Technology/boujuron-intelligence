@@ -13,6 +13,7 @@ export function Register() {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<UserRole>("Fraud Analyst");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
 
@@ -24,7 +25,10 @@ export function Register() {
     setError("");
     try {
       await register(name, email, password, role);
-      navigate("/", { replace: true });
+      setSuccess(true);
+      window.setTimeout(() => {
+        navigate("/login", { replace: true, state: { registeredEmail: email } });
+      }, 1400);
     } catch {
       setError("Could not create account. Check the details and try again.");
     } finally {
@@ -70,6 +74,11 @@ export function Register() {
           <p className="auth-switch">Already registered? <Link to="/login">Sign in</Link></p>
         </form>
       </section>
+      {success && (
+        <div className="toast-success" role="status">
+          Registered successfully. Redirecting to login...
+        </div>
+      )}
     </main>
   );
 }

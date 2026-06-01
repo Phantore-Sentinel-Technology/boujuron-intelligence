@@ -11,7 +11,9 @@ export function Login() {
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state as { from?: { pathname: string } } | null)?.from?.pathname || "/";
+  const routeState = location.state as { from?: { pathname: string }; registeredEmail?: string } | null;
+  const from = routeState?.from?.pathname || "/";
+  const registeredEmail = routeState?.registeredEmail;
 
   if (user) return <Navigate to={from} replace />;
 
@@ -42,6 +44,7 @@ export function Login() {
 
         <form className="auth-form" onSubmit={onSubmit}>
           <h2>Analyst Login</h2>
+          {registeredEmail && <p className="form-success">Registered successfully. Sign in with {registeredEmail}.</p>}
           <label>
             <span>Email</span>
             <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required />

@@ -31,7 +31,6 @@ export async function login(email: string, password: string) {
 
 export async function register(name: string, email: string, password: string, role: UserRole) {
   const response = await api.post<AuthResponse>("/auth/register", { name, email, password, role });
-  setAuthToken(response.data.access_token);
   return response.data;
 }
 
