@@ -63,9 +63,24 @@ export interface UserRiskProfile {
   current_location?: string | null;
   ip_history: string[];
   behavioral_profile: Record<string, string>;
+  behavior_anomalies: BehaviorAnomaly[];
+  risk_timeline: RiskTimelinePoint[];
   recent_events: UserProfileEvent[];
   previous_investigations: FraudAlert[];
   score_breakdown: ScoreBreakdownItem[];
+}
+
+export interface RiskTimelinePoint {
+  timestamp: string;
+  score: number;
+  level: RiskLevel;
+  reason: string;
+}
+
+export interface BehaviorAnomaly {
+  label: string;
+  severity: RiskLevel | "INFO";
+  detail: string;
 }
 
 export type CaseStatus = "NEW" | "ASSIGNED" | "INVESTIGATING" | "ESCALATED" | "RESOLVED" | "ARCHIVED";
@@ -122,4 +137,32 @@ export interface CaseUpdate {
   decision?: CaseDecision | null;
   potential_loss?: number | null;
   actual_loss?: number | null;
+}
+
+export interface NotificationItem {
+  id: string;
+  title: string;
+  message: string;
+  severity: RiskLevel | "INFO";
+  case_id?: number | null;
+  user_id?: string | null;
+  created_at: string;
+  read: boolean;
+}
+
+export interface InvestigationFeedItem {
+  id: string;
+  event_type: string;
+  description: string;
+  actor: string;
+  case_id?: number | null;
+  case_number?: string | null;
+  user_id?: string | null;
+  risk_level?: RiskLevel | null;
+  created_at: string;
+}
+
+export interface IntelligenceActivity {
+  notifications: NotificationItem[];
+  feed: InvestigationFeedItem[];
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, History, MapPin, MonitorSmartphone, Network, ShieldAlert } from "lucide-react";
+import { AlertTriangle, ArrowLeft, History, MapPin, MonitorSmartphone, Network, ShieldAlert, TrendingUp } from "lucide-react";
 import type { UserRiskProfile } from "../types";
 import { getUserRiskProfile } from "../services/api";
 import { RiskBadge } from "../components/RiskBadge";
@@ -94,6 +94,50 @@ export function CustomerProfile() {
 
         <section className="insight-panel profile-card breakdown-card">
           <ScoreBreakdown items={profile.score_breakdown} total={profile.current_risk} />
+        </section>
+      </div>
+
+      <div className="profile-grid wide">
+        <section className="insight-panel profile-card">
+          <div className="section-header compact">
+            <div>
+              <p className="eyebrow">Behavior anomalies</p>
+              <h3>Deviation Highlights</h3>
+            </div>
+            <AlertTriangle size={20} />
+          </div>
+          <div className="anomaly-list">
+            {profile.behavior_anomalies.map((item) => (
+              <div key={`${item.label}-${item.detail}`} className={`anomaly-item ${item.severity.toLowerCase()}`}>
+                <strong>{item.label}</strong>
+                <span>{item.detail}</span>
+              </div>
+            ))}
+            {profile.behavior_anomalies.length === 0 && <div className="empty-state slim">No major behavioral deviations detected.</div>}
+          </div>
+        </section>
+
+        <section className="insight-panel profile-card">
+          <div className="section-header compact">
+            <div>
+              <p className="eyebrow">Risk timeline</p>
+              <h3>Score Trend</h3>
+            </div>
+            <TrendingUp size={20} />
+          </div>
+          <div className="risk-timeline">
+            {profile.risk_timeline.map((point) => (
+              <div key={`${point.timestamp}-${point.score}`} className="risk-point">
+                <time>{point.timestamp.slice(0, 10)}</time>
+                <div>
+                  <i style={{ height: `${Math.max(point.score, 8)}%` }} />
+                </div>
+                <strong>{point.score}</strong>
+                <RiskBadge level={point.level} />
+              </div>
+            ))}
+            {profile.risk_timeline.length === 0 && <div className="empty-state slim">No risk history yet.</div>}
+          </div>
         </section>
       </div>
 

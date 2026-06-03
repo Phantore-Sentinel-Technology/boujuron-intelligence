@@ -1,11 +1,15 @@
 import { NavLink } from "react-router-dom";
 import { Activity, Bell, BriefcaseBusiness, Gauge, LayoutDashboard, LogOut, Moon, Settings, ShieldCheck, Sun, Users } from "lucide-react";
 import type { PropsWithChildren } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
+import type { NotificationItem } from "../types";
+import { getIntelligenceActivity } from "../services/api";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/activity", label: "Live Feed", icon: Activity },
   { to: "/analytics", label: "Analytics", icon: Activity },
   { to: "/alerts", label: "Alerts", icon: Bell },
   { to: "/cases", label: "Cases", icon: BriefcaseBusiness },
@@ -20,7 +24,24 @@ interface AppShellProps extends PropsWithChildren {
 export function AppShell({ children, connection }: AppShellProps) {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const ThemeIcon = theme === "dark" ? Moon : Sun;
+
+  useEffect(() => {
+    let mounted = true;
+    const load = () => {
+      getIntelligenceActivity(12)
+        .then((data) => mounted && setNotifications(data.notifications))
+        .catch(() => mounted && setNotifications([]));
+    };
+    load();
+    const timer = window.setInterval(load, 8000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   return (
     <div className="app-shell">
@@ -78,9 +99,36 @@ export function AppShell({ children, connection }: AppShellProps) {
             <p className="eyebrow">Fraud intelligence command center</p>
             <h1>Boujuron Risk Operations</h1>
           </div>
-          <div className="operator-chip">
-            <span className="pulse" />
-            Analyst console
+          <div className="topbar-actions">
+            <div className="notification-wrap">
+              <button className="notification-button" onClick={() => setNotificationsOpen((open) => !open)} aria-label="Open notifications">
+                <Bell size={18} />
+                {notifications.length > 0 && <span>{notifications.length}</span>}
+              </button>
+              {notificationsOpen && (
+                <div className="notification-popover">
+                  <div className="section-header compact">
+                    <div>
+                      <p className="eyebrow">Notifications</p>
+                      <h3>Live Signals</h3>
+                    </div>
+                  </div>
+                  <div className="notification-list">
+                    {notifications.map((item) => (
+                      <NavLink key={item.id} to={item.case_id ? `/cases/${item.case_id}` : "/activity"} className={`notification-item ${item.severity.toLowerCase()}`} onClick={() => setNotificationsOpen(false)}>
+                        <strong>{item.title}</strong>
+                        <span>{item.message}</span>
+                      </NavLink>
+                    ))}
+                    {notifications.length === 0 && <div className="empty-state slim">No live notifications yet.</div>}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="operator-chip">
+              <span className="pulse" />
+              Analyst console
+            </div>
           </div>
         </header>
         {children}

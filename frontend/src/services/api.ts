@@ -1,5 +1,5 @@
 import axios from "axios";
-import type { AuthResponse, AuthUser, CaseDetail, CaseSummary, CaseUpdate, FraudAlert, UserRiskProfile, UserRole } from "../types";
+import type { AuthResponse, AuthUser, CaseDetail, CaseSummary, CaseUpdate, FraudAlert, IntelligenceActivity, UserRiskProfile, UserRole } from "../types";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || ""
@@ -69,6 +69,11 @@ export async function updateCase(caseId: string | number, update: CaseUpdate) {
 
 export async function addCaseNote(caseId: string | number, note: string) {
   const response = await api.post<CaseDetail>(`/cases/${caseId}/notes`, { note });
+  return response.data;
+}
+
+export async function getIntelligenceActivity(limit = 30) {
+  const response = await api.get<IntelligenceActivity>("/intelligence/activity", { params: { limit } });
   return response.data;
 }
 

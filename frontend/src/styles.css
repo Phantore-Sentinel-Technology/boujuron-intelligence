@@ -14,7 +14,7 @@ body {
   background: #0f172a;
 }
 
-button, input, select {
+button, input, select, textarea {
   font: inherit;
 }
 
@@ -193,6 +193,57 @@ button, input, select {
   border-radius: 8px;
   background: #1e293b;
   color: #cbd5e1;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.notification-wrap {
+  position: relative;
+}
+
+.notification-button {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #1e293b;
+  color: #f8fafc;
+  cursor: pointer;
+}
+
+.notification-button span {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.notification-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 50;
+  width: min(380px, calc(100vw - 36px));
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #111827;
+  box-shadow: 0 24px 50px rgba(2, 6, 23, 0.42);
+  padding: 14px;
 }
 
 .pulse {
@@ -828,6 +879,147 @@ dd {
   font-size: 12px;
 }
 
+.anomaly-list, .notification-list, .investigation-feed {
+  display: grid;
+  gap: 10px;
+}
+
+.anomaly-item, .notification-item, .feed-event {
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  padding: 12px;
+}
+
+.anomaly-item strong, .anomaly-item span,
+.notification-item strong, .notification-item span {
+  display: block;
+}
+
+.anomaly-item span, .notification-item span {
+  color: #94a3b8;
+  margin-top: 5px;
+  line-height: 1.35;
+}
+
+.anomaly-item.high, .notification-item.high {
+  border-color: rgba(249, 115, 22, 0.44);
+}
+
+.anomaly-item.critical, .notification-item.critical {
+  border-color: rgba(220, 38, 38, 0.46);
+}
+
+.anomaly-item.medium, .notification-item.medium {
+  border-color: rgba(245, 158, 11, 0.42);
+}
+
+.notification-item {
+  color: inherit;
+  text-decoration: none;
+}
+
+.notification-list.full .notification-item time {
+  display: block;
+  margin-top: 8px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.risk-timeline {
+  min-height: 220px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.risk-point {
+  display: grid;
+  gap: 7px;
+  justify-items: center;
+  min-width: 0;
+}
+
+.risk-point time {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.risk-point > div {
+  width: 100%;
+  height: 120px;
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  padding: 6px;
+}
+
+.risk-point i {
+  display: block;
+  width: 100%;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #ef4444, #f59e0b 54%, #22c55e);
+}
+
+.activity-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.42fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(34, 197, 94, 0.42);
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.12);
+  color: #86efac;
+  padding: 10px 12px;
+  font-weight: 900;
+}
+
+.feed-event {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.feed-event-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #1e293b;
+  color: #38bdf8;
+  border: 1px solid #334155;
+}
+
+.feed-event span, .feed-event small, .feed-event time {
+  display: block;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+.feed-event small a {
+  color: #38bdf8;
+  text-decoration: none;
+  font-weight: 800;
+}
+
+.feed-event-side {
+  display: grid;
+  gap: 7px;
+  justify-items: end;
+}
+
 .score-breakdown {
   display: grid;
   gap: 14px;
@@ -1136,6 +1328,7 @@ dd {
 :root[data-theme="light"] .brand-mark,
 :root[data-theme="light"] .stat-icon,
 :root[data-theme="light"] .operator-chip,
+:root[data-theme="light"] .notification-button,
 :root[data-theme="light"] .stat-card,
 :root[data-theme="light"] .chart-panel,
 :root[data-theme="light"] .table-section,
@@ -1282,9 +1475,40 @@ dd {
   box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12);
 }
 
+:root[data-theme="light"] .notification-popover {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 24px 50px rgba(15, 23, 42, 0.16);
+}
+
+:root[data-theme="light"] .anomaly-item,
+:root[data-theme="light"] .notification-item,
+:root[data-theme="light"] .feed-event,
+:root[data-theme="light"] .risk-point > div,
+:root[data-theme="light"] .feed-event-icon {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .anomaly-item span,
+:root[data-theme="light"] .notification-item span,
+:root[data-theme="light"] .notification-list.full .notification-item time,
+:root[data-theme="light"] .risk-point time,
+:root[data-theme="light"] .feed-event span,
+:root[data-theme="light"] .feed-event small,
+:root[data-theme="light"] .feed-event time {
+  color: #64748b;
+}
+
+:root[data-theme="light"] .live-indicator {
+  background: #ecfdf5;
+  color: #166534;
+}
+
 @media (max-width: 1180px) {
   .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .analytics-grid, .content-grid, .profile-grid, .profile-grid.wide, .case-detail-grid, .case-detail-grid.lower { grid-template-columns: 1fr; }
+  .analytics-grid, .content-grid, .profile-grid, .profile-grid.wide, .case-detail-grid, .case-detail-grid.lower, .activity-grid { grid-template-columns: 1fr; }
   .workflow-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
@@ -1305,4 +1529,8 @@ dd {
   .profile-risk, .case-hero-risk { justify-items: start; }
   .workflow-strip, .case-form-grid { grid-template-columns: 1fr; }
   .user-chip { align-items: flex-start; flex-direction: column; }
+  .topbar-actions { width: 100%; justify-content: space-between; }
+  .notification-popover { left: 0; right: auto; }
+  .feed-event { grid-template-columns: 1fr; }
+  .feed-event-side { justify-items: start; }
 }

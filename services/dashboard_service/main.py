@@ -29,6 +29,11 @@ from services.dashboard_service.schemas import (
     CaseUpdateRequest,
     EventResponse,
     FraudAlertResponse,
+    BehaviorAnomaly,
+    IntelligenceActivityResponse,
+    InvestigationFeedItemResponse,
+    NotificationResponse,
+    RiskTimelinePoint,
     ScoreBreakdownItem,
     UserProfileEvent,
     UserProfileResponse,
@@ -322,6 +327,68 @@ def common_window(timestamps: list[str]) -> str:
     return f"{max(avg_hour - 2, 0):02d}:00 - {min(avg_hour + 2, 23):02d}:00"
 
 
+def build_behavior_anomalies(events: list[UserProfileEvent], alerts: list[FraudAlertResponse]) -> list[BehaviorAnomaly]:
+    anomalies: list[BehaviorAnomaly] = []
+    if events:
+        latest = events[0]
+        historical_devices = {event.device_type for event in events[1:] if event.device_type}
+        historical_locations = {event.location for event in events[1:] if event.location}
+        amounts = [event.amount for event in events[1:] if event.amount is not None]
+        latest_network = (latest.network or "").upper()
+        latest_device = (latest.device_type or "").lower()
+
+        if latest.device_type and historical_devices and latest.device_type not in historical_devices:
+            anomalies.append(BehaviorAnomaly(label="New Device", severity="HIGH", detail=f"{latest.device_type} is not part of the historical device pattern"))
+        if latest.location and historical_locations and latest.location not in historical_locations:
+            anomalies.append(BehaviorAnomaly(label="Unusual Location", severity="HIGH", detail=f"Current activity from {latest.location} differs from known locations"))
+        if "TOR" in latest_network or "VPN" in latest_network:
+            anomalies.append(BehaviorAnomaly(label="Anonymous Network", severity="CRITICAL", detail=f"{latest.network} network observed on latest event"))
+        if "root" in latest_device:
+            anomalies.append(BehaviorAnomaly(label="Rooted Device", severity="CRITICAL", detail=f"{latest.device_type} indicates elevated device risk"))
+        if latest.amount is not None and amounts:
+            avg_amount = mean(amounts)
+            if avg_amount and latest.amount >= avg_amount * 5:
+                anomalies.append(BehaviorAnomaly(label="Transfer Spike", severity="HIGH", detail=f"Latest amount is {round(latest.amount / avg_amount, 1)}x above normal"))
+
+    for reason in parse_reasons(alerts[0].reason if alerts else None):
+        lower = reason.lower()
+        if any(keyword in lower for keyword in ("behavior", "velocity", "tor", "rooted", "location")):
+            label = reason.title()
+            if not any(item.label == label for item in anomalies):
+                anomalies.append(BehaviorAnomaly(label=label, severity="MEDIUM", detail=reason))
+
+    return anomalies[:8]
+
+
+def notification_from_row(row) -> NotificationResponse:
+    event_id, event_type, description, actor, created_at, case_id, case_number, user_id, risk_level, status, assigned_to = row
+    severity = "INFO"
+    title = "Investigation update"
+    if risk_level == "CRITICAL" or status == "ESCALATED":
+        severity = "CRITICAL"
+        title = "Critical investigation update"
+    elif event_type in {"ASSIGNED_TO", "STATUS"} or status in {"NEW", "ASSIGNED"}:
+        severity = "HIGH"
+        title = "Case workflow update"
+    elif event_type == "NOTE_ADDED":
+        title = "Analyst comment added"
+
+    if assigned_to:
+        message = f"{case_number} for {user_id}: {description}. Assigned to {assigned_to}."
+    else:
+        message = f"{case_number} for {user_id}: {description}."
+
+    return NotificationResponse(
+        id=f"timeline-{event_id}",
+        title=title,
+        message=message,
+        severity=severity,
+        case_id=case_id,
+        user_id=user_id,
+        created_at=str(created_at),
+    )
+
+
 @app.post("/auth/register", response_model=AuthTokenResponse)
 def register(payload: AuthRegisterRequest):
     role = payload.role if payload.role in ALLOWED_ROLES else "Fraud Analyst"
@@ -556,11 +623,68 @@ def get_user_profile(user_id: str, current_user: AuthUserResponse = Depends(get_
             "Normal Device": device_counts.most_common(1)[0][0] if device_counts else "Unknown",
             "Normal Location": location_counts.most_common(1)[0][0] if location_counts else "Unknown",
             "Average Transaction": f"{round(mean(amounts), 2):,}" if amounts else "Unknown",
+            "Average Events/Day": str(round(len(events) / max(len({event.timestamp[:10] for event in events if event.timestamp}), 1), 1)) if events else "Unknown",
         },
+        behavior_anomalies=build_behavior_anomalies(events, alerts),
+        risk_timeline=[
+            RiskTimelinePoint(
+                timestamp=alert.timestamp,
+                score=int(float(alert.risk_score or 0)),
+                level=alert.risk_level,
+                reason=alert.reason,
+            )
+            for alert in reversed(alerts)
+        ],
         recent_events=events[:10],
         previous_investigations=alerts,
         score_breakdown=build_score_breakdown(current_alert.reason if current_alert else None, current_score),
     )
+
+
+@app.get("/intelligence/activity", response_model=IntelligenceActivityResponse)
+def get_intelligence_activity(limit: int = Query(30), current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    ensure_case_tables(cursor)
+    materialize_cases_from_alerts(cursor)
+    conn.commit()
+
+    cursor.execute("""
+        SELECT
+            t.id,
+            t.event_type,
+            t.description,
+            t.actor,
+            t.created_at,
+            c.id,
+            c.case_number,
+            c.user_id,
+            c.risk_level,
+            c.status,
+            c.assigned_to
+        FROM case_timeline t
+        JOIN cases c ON c.id = t.case_id
+        ORDER BY t.created_at DESC, t.id DESC
+        LIMIT %s
+    """, (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+
+    notifications = [notification_from_row(row) for row in rows[:12]]
+    feed = [
+        InvestigationFeedItemResponse(
+            id=f"timeline-{row[0]}",
+            event_type=row[1],
+            description=row[2],
+            actor=row[3],
+            created_at=str(row[4]),
+            case_id=row[5],
+            case_number=row[6],
+            user_id=row[7],
+            risk_level=row[8],
+        )
+        for row in rows
+    ]
+    return IntelligenceActivityResponse(notifications=notifications, feed=feed)
 
 
 @app.get("/cases", response_model=list[CaseSummaryResponse])

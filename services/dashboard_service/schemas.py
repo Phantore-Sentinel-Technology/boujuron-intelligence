@@ -64,6 +64,19 @@ class UserProfileEvent(BaseModel):
     timestamp: str
 
 
+class RiskTimelinePoint(BaseModel):
+    timestamp: str
+    score: int
+    level: str
+    reason: str
+
+
+class BehaviorAnomaly(BaseModel):
+    label: str
+    severity: str
+    detail: str
+
+
 class UserProfileResponse(BaseModel):
     user_id: str
     current_risk: int
@@ -75,6 +88,8 @@ class UserProfileResponse(BaseModel):
     current_location: str | None = None
     ip_history: list[str]
     behavioral_profile: dict[str, str]
+    behavior_anomalies: list[BehaviorAnomaly]
+    risk_timeline: list[RiskTimelinePoint]
     recent_events: list[UserProfileEvent]
     previous_investigations: list[FraudAlertResponse]
     score_breakdown: list[ScoreBreakdownItem]
@@ -138,3 +153,31 @@ class CaseUpdateRequest(BaseModel):
 
 class CaseNoteRequest(BaseModel):
     note: str
+
+
+class NotificationResponse(BaseModel):
+    id: str
+    title: str
+    message: str
+    severity: str
+    case_id: int | None = None
+    user_id: str | None = None
+    created_at: str
+    read: bool = False
+
+
+class InvestigationFeedItemResponse(BaseModel):
+    id: str
+    event_type: str
+    description: str
+    actor: str
+    case_id: int | None = None
+    case_number: str | None = None
+    user_id: str | None = None
+    risk_level: str | None = None
+    created_at: str
+
+
+class IntelligenceActivityResponse(BaseModel):
+    notifications: list[NotificationResponse]
+    feed: list[InvestigationFeedItemResponse]
