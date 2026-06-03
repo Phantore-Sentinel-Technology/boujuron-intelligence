@@ -78,3 +78,63 @@ class UserProfileResponse(BaseModel):
     recent_events: list[UserProfileEvent]
     previous_investigations: list[FraudAlertResponse]
     score_breakdown: list[ScoreBreakdownItem]
+
+
+CaseStatus = str
+CasePriority = str
+AnalystFeedback = str
+
+
+class CaseSummaryResponse(BaseModel):
+    id: int
+    case_number: str
+    user_id: str
+    risk_score: int
+    risk_level: str
+    status: CaseStatus
+    priority: CasePriority
+    assigned_to: str | None = None
+    analyst_feedback: AnalystFeedback | None = None
+    created_at: str
+    updated_at: str
+
+
+class CaseNoteResponse(BaseModel):
+    id: int
+    author: str
+    note: str
+    created_at: str
+
+
+class CaseTimelineResponse(BaseModel):
+    id: int
+    event_type: str
+    description: str
+    actor: str
+    created_at: str
+
+
+class CaseDetailResponse(CaseSummaryResponse):
+    reason: str
+    recommended_action: str | None = None
+    decision: str | None = None
+    potential_loss: float | None = None
+    actual_loss: float | None = None
+    fraud_signals: list[str]
+    score_breakdown: list[ScoreBreakdownItem]
+    notes: list[CaseNoteResponse]
+    timeline: list[CaseTimelineResponse]
+
+
+class CaseUpdateRequest(BaseModel):
+    assigned_to: str | None = None
+    status: CaseStatus | None = None
+    priority: CasePriority | None = None
+    analyst_feedback: AnalystFeedback | None = None
+    decision: str | None = None
+    potential_loss: float | None = None
+    actual_loss: float | None = None
+
+
+class CaseNoteRequest(BaseModel):
+    note: str

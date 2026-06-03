@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Activity, Bell, Gauge, LayoutDashboard, LogOut, Moon, Settings, ShieldCheck, Sun, Users } from "lucide-react";
+import { Activity, Bell, BriefcaseBusiness, Gauge, LayoutDashboard, LogOut, Moon, Settings, ShieldCheck, Sun, Users } from "lucide-react";
 import type { PropsWithChildren } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
@@ -8,6 +8,7 @@ const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/analytics", label: "Analytics", icon: Activity },
   { to: "/alerts", label: "Alerts", icon: Bell },
+  { to: "/cases", label: "Cases", icon: BriefcaseBusiness },
   { to: "/users", label: "Users", icon: Users },
   { to: "/settings", label: "Settings", icon: Settings }
 ];

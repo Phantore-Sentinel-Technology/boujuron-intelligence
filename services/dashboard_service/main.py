@@ -21,6 +21,12 @@ from services.dashboard_service.schemas import (
     AuthRegisterRequest,
     AuthTokenResponse,
     AuthUserResponse,
+    CaseDetailResponse,
+    CaseNoteRequest,
+    CaseNoteResponse,
+    CaseSummaryResponse,
+    CaseTimelineResponse,
+    CaseUpdateRequest,
     EventResponse,
     FraudAlertResponse,
     ScoreBreakdownItem,
@@ -35,6 +41,10 @@ FRONTEND_DIST = Path("frontend/dist")
 AUTH_SECRET = os.getenv("JWT_SECRET", "boujuron-local-development-secret")
 TOKEN_TTL_SECONDS = 60 * 60 * 12
 ALLOWED_ROLES = {"Admin", "Fraud Analyst", "Investigator", "Read-Only Auditor"}
+CASE_STATUSES = {"NEW", "ASSIGNED", "INVESTIGATING", "ESCALATED", "RESOLVED", "ARCHIVED"}
+CASE_PRIORITIES = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
+ANALYST_FEEDBACK = {"TRUE_FRAUD", "FALSE_POSITIVE", "NEEDS_REVIEW"}
+CASE_DECISIONS = {"ALLOW", "VERIFY", "BLOCK", "FREEZE", "ESCALATE"}
 
 if (FRONTEND_DIST / "assets").exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
@@ -55,6 +65,146 @@ def ensure_auth_tables(cursor):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+
+def ensure_case_tables(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cases (
+            id SERIAL PRIMARY KEY,
+            case_number TEXT UNIQUE,
+            fraud_alert_id INTEGER UNIQUE,
+            user_id TEXT NOT NULL,
+            reason TEXT DEFAULT '',
+            risk_score INTEGER DEFAULT 0,
+            risk_level TEXT DEFAULT 'LOW',
+            status TEXT DEFAULT 'NEW',
+            priority TEXT DEFAULT 'LOW',
+            assigned_to TEXT,
+            assigned_at TIMESTAMP,
+            analyst_feedback TEXT,
+            decision TEXT,
+            recommended_action TEXT,
+            potential_loss NUMERIC,
+            actual_loss NUMERIC,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            resolved_at TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS case_notes (
+            id SERIAL PRIMARY KEY,
+            case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+            author TEXT NOT NULL,
+            note TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS case_timeline (
+            id SERIAL PRIMARY KEY,
+            case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+            event_type TEXT NOT NULL,
+            description TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+
+def ensure_fraud_alert_columns(cursor):
+    for column_name, column_type in (
+        ("recommended_action", "TEXT"),
+        ("confidence", "NUMERIC"),
+        ("signals_triggered", "INTEGER"),
+        ("behavioral_match", "BOOLEAN"),
+    ):
+        cursor.execute(f"""
+            ALTER TABLE fraud_alerts
+            ADD COLUMN IF NOT EXISTS {column_name} {column_type}
+        """)
+
+
+def priority_from_risk(risk_level: str | None) -> str:
+    level = (risk_level or "LOW").upper()
+    return level if level in CASE_PRIORITIES else "LOW"
+
+
+def materialize_cases_from_alerts(cursor):
+    ensure_fraud_alert_columns(cursor)
+    cursor.execute("""
+        SELECT
+            id,
+            user_id,
+            reason,
+            risk_score,
+            risk_level,
+            recommended_action,
+            timestamp
+        FROM fraud_alerts
+        ORDER BY id ASC
+    """)
+    alerts = cursor.fetchall()
+    for alert in alerts:
+        alert_id, user_id, reason, risk_score, risk_level, recommended_action, timestamp = alert
+        cursor.execute("SELECT id FROM cases WHERE fraud_alert_id = %s", (alert_id,))
+        if cursor.fetchone():
+            continue
+
+        cursor.execute("""
+            INSERT INTO cases (
+                case_number,
+                fraud_alert_id,
+                user_id,
+                reason,
+                risk_score,
+                risk_level,
+                priority,
+                recommended_action,
+                created_at,
+                updated_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+            RETURNING id
+        """, (
+            f"CASE-{alert_id:04d}",
+            alert_id,
+            user_id,
+            reason or "",
+            int(risk_score or 0),
+            risk_level or "LOW",
+            priority_from_risk(risk_level),
+            recommended_action,
+            timestamp,
+        ))
+        case_id = cursor.fetchone()[0]
+        cursor.execute("""
+            INSERT INTO case_timeline (case_id, event_type, description, actor)
+            VALUES (%s, %s, %s, %s)
+        """, (case_id, "CASE_CREATED", "Case opened from fraud alert", "System"))
+
+
+def timeline(cursor, case_id: int, event_type: str, description: str, actor: str):
+    cursor.execute("""
+        INSERT INTO case_timeline (case_id, event_type, description, actor)
+        VALUES (%s, %s, %s, %s)
+    """, (case_id, event_type, description, actor))
+
+
+def row_to_case_summary(row) -> CaseSummaryResponse:
+    return CaseSummaryResponse(
+        id=row[0],
+        case_number=row[1],
+        user_id=row[2],
+        risk_score=row[3],
+        risk_level=row[4],
+        status=row[5],
+        priority=row[6],
+        assigned_to=row[7],
+        analyst_feedback=row[8],
+        created_at=str(row[9]),
+        updated_at=str(row[10]),
+    )
 
 
 def hash_password(password: str) -> str:
@@ -260,17 +410,7 @@ def get_events(limit: int = Query(50)):
 def get_fraud(limit: int = Query(50)):
     conn, cursor = get_db()
 
-    for column_name, column_type in (
-        ("recommended_action", "TEXT"),
-        ("confidence", "NUMERIC"),
-        ("signals_triggered", "INTEGER"),
-        ("behavioral_match", "BOOLEAN"),
-    ):
-        cursor.execute(f"""
-            ALTER TABLE fraud_alerts
-            ADD COLUMN IF NOT EXISTS {column_name} {column_type}
-        """)
-
+    ensure_fraud_alert_columns(cursor)
     conn.commit()
 
     cursor.execute("""
@@ -421,6 +561,217 @@ def get_user_profile(user_id: str, current_user: AuthUserResponse = Depends(get_
         previous_investigations=alerts,
         score_breakdown=build_score_breakdown(current_alert.reason if current_alert else None, current_score),
     )
+
+
+@app.get("/cases", response_model=list[CaseSummaryResponse])
+def get_cases(
+    status: str | None = Query(default=None),
+    priority: str | None = Query(default=None),
+    analyst: str | None = Query(default=None),
+    risk_level: str | None = Query(default=None),
+    current_user: AuthUserResponse = Depends(get_current_user),
+):
+    conn, cursor = get_db()
+    ensure_case_tables(cursor)
+    materialize_cases_from_alerts(cursor)
+    conn.commit()
+
+    cursor.execute("""
+        SELECT
+            id,
+            case_number,
+            user_id,
+            risk_score,
+            risk_level,
+            status,
+            priority,
+            assigned_to,
+            analyst_feedback,
+            created_at,
+            updated_at
+        FROM cases
+        WHERE (%s IS NULL OR status = %s)
+          AND (%s IS NULL OR priority = %s)
+          AND (%s IS NULL OR assigned_to = %s)
+          AND (%s IS NULL OR risk_level = %s)
+        ORDER BY
+            CASE priority
+                WHEN 'CRITICAL' THEN 4
+                WHEN 'HIGH' THEN 3
+                WHEN 'MEDIUM' THEN 2
+                ELSE 1
+            END DESC,
+            updated_at DESC,
+            id DESC
+    """, (status, status, priority, priority, analyst, analyst, risk_level, risk_level))
+    rows = cursor.fetchall()
+    conn.close()
+    return [row_to_case_summary(row) for row in rows]
+
+
+@app.get("/cases/{case_id}", response_model=CaseDetailResponse)
+def get_case(case_id: int, current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    ensure_case_tables(cursor)
+    materialize_cases_from_alerts(cursor)
+    conn.commit()
+
+    cursor.execute("""
+        SELECT
+            id,
+            case_number,
+            user_id,
+            risk_score,
+            risk_level,
+            status,
+            priority,
+            assigned_to,
+            analyst_feedback,
+            created_at,
+            updated_at,
+            reason,
+            recommended_action,
+            decision,
+            potential_loss,
+            actual_loss
+        FROM cases
+        WHERE id = %s
+    """, (case_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    cursor.execute("""
+        SELECT id, author, note, created_at
+        FROM case_notes
+        WHERE case_id = %s
+        ORDER BY created_at DESC, id DESC
+    """, (case_id,))
+    note_rows = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT id, event_type, description, actor, created_at
+        FROM case_timeline
+        WHERE case_id = %s
+        ORDER BY created_at DESC, id DESC
+    """, (case_id,))
+    timeline_rows = cursor.fetchall()
+    conn.close()
+
+    summary = row_to_case_summary(row[:11])
+    reason = row[11] or ""
+    return CaseDetailResponse(
+        **summary.model_dump(),
+        reason=reason,
+        recommended_action=row[12],
+        decision=row[13],
+        potential_loss=float(row[14]) if row[14] is not None else None,
+        actual_loss=float(row[15]) if row[15] is not None else None,
+        fraud_signals=parse_reasons(reason),
+        score_breakdown=build_score_breakdown(reason, row[3]),
+        notes=[
+            CaseNoteResponse(id=r[0], author=r[1], note=r[2], created_at=str(r[3]))
+            for r in note_rows
+        ],
+        timeline=[
+            CaseTimelineResponse(id=r[0], event_type=r[1], description=r[2], actor=r[3], created_at=str(r[4]))
+            for r in timeline_rows
+        ],
+    )
+
+
+@app.patch("/cases/{case_id}", response_model=CaseDetailResponse)
+def update_case(case_id: int, payload: CaseUpdateRequest, current_user: AuthUserResponse = Depends(get_current_user)):
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        return get_case(case_id, current_user)
+
+    validators = {
+        "status": CASE_STATUSES,
+        "priority": CASE_PRIORITIES,
+        "analyst_feedback": ANALYST_FEEDBACK,
+        "decision": CASE_DECISIONS,
+    }
+    for field, allowed in validators.items():
+        if field in changes and changes[field] is not None and changes[field] not in allowed:
+            raise HTTPException(status_code=400, detail=f"Invalid {field}")
+
+    conn, cursor = get_db()
+    ensure_case_tables(cursor)
+    cursor.execute("""
+        SELECT assigned_to, status, priority, analyst_feedback, decision, potential_loss, actual_loss
+        FROM cases
+        WHERE id = %s
+    """, (case_id,))
+    before = cursor.fetchone()
+    if not before:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    current_values = {
+        "assigned_to": before[0],
+        "status": before[1],
+        "priority": before[2],
+        "analyst_feedback": before[3],
+        "decision": before[4],
+        "potential_loss": float(before[5]) if before[5] is not None else None,
+        "actual_loss": float(before[6]) if before[6] is not None else None,
+    }
+
+    set_clauses = ["updated_at = CURRENT_TIMESTAMP"]
+    params = []
+    for field, value in changes.items():
+        set_clauses.append(f"{field} = %s")
+        params.append(value)
+    if "assigned_to" in changes and changes["assigned_to"]:
+        set_clauses.append("assigned_at = CURRENT_TIMESTAMP")
+    if changes.get("status") == "RESOLVED":
+        set_clauses.append("resolved_at = CURRENT_TIMESTAMP")
+    params.append(case_id)
+    cursor.execute(f"UPDATE cases SET {', '.join(set_clauses)} WHERE id = %s", params)
+
+    actor = current_user.name
+    labels = {
+        "assigned_to": "Assigned analyst",
+        "status": "Status",
+        "priority": "Priority",
+        "analyst_feedback": "Analyst feedback",
+        "decision": "Decision",
+        "potential_loss": "Potential loss",
+        "actual_loss": "Actual loss",
+    }
+    for field, value in changes.items():
+        if current_values.get(field) != value:
+            timeline(cursor, case_id, field.upper(), f"{labels[field]} changed to {value or 'Unassigned'}", actor)
+
+    conn.commit()
+    conn.close()
+    return get_case(case_id, current_user)
+
+
+@app.post("/cases/{case_id}/notes", response_model=CaseDetailResponse)
+def add_case_note(case_id: int, payload: CaseNoteRequest, current_user: AuthUserResponse = Depends(get_current_user)):
+    note = payload.note.strip()
+    if not note:
+        raise HTTPException(status_code=400, detail="Note cannot be empty")
+
+    conn, cursor = get_db()
+    ensure_case_tables(cursor)
+    cursor.execute("SELECT id FROM cases WHERE id = %s", (case_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    cursor.execute("""
+        INSERT INTO case_notes (case_id, author, note)
+        VALUES (%s, %s, %s)
+    """, (case_id, current_user.name, note))
+    timeline(cursor, case_id, "NOTE_ADDED", "Investigation note added", current_user.name)
+    cursor.execute("UPDATE cases SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", (case_id,))
+    conn.commit()
+    conn.close()
+    return get_case(case_id, current_user)
 
 
 @app.get("/ml-features")

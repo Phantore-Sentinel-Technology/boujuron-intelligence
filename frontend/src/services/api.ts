@@ -1,5 +1,5 @@
 import axios from "axios";
-import type { AuthResponse, AuthUser, FraudAlert, UserRiskProfile, UserRole } from "../types";
+import type { AuthResponse, AuthUser, CaseDetail, CaseSummary, CaseUpdate, FraudAlert, UserRiskProfile, UserRole } from "../types";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || ""
@@ -48,6 +48,27 @@ export async function getFraudAlerts(limit = 100) {
 
 export async function getUserRiskProfile(userId: string) {
   const response = await api.get<UserRiskProfile>(`/customers/${encodeURIComponent(userId)}/profile`);
+  return response.data;
+}
+
+export async function getCases(filters: Record<string, string> = {}) {
+  const params = Object.fromEntries(Object.entries(filters).filter(([, value]) => value));
+  const response = await api.get<CaseSummary[]>("/cases", { params });
+  return response.data;
+}
+
+export async function getCase(caseId: string | number) {
+  const response = await api.get<CaseDetail>(`/cases/${caseId}`);
+  return response.data;
+}
+
+export async function updateCase(caseId: string | number, update: CaseUpdate) {
+  const response = await api.patch<CaseDetail>(`/cases/${caseId}`, update);
+  return response.data;
+}
+
+export async function addCaseNote(caseId: string | number, note: string) {
+  const response = await api.post<CaseDetail>(`/cases/${caseId}/notes`, { note });
   return response.data;
 }
 
