@@ -1,5 +1,20 @@
 import axios from "axios";
-import type { AuthResponse, AuthUser, CaseDetail, CaseSummary, CaseUpdate, FraudAlert, IntelligenceActivity, UserRiskProfile, UserRole } from "../types";
+import type {
+  AnalystPerformance,
+  AnalyticsOverview,
+  AuthResponse,
+  AuthUser,
+  CaseDetail,
+  CaseSummary,
+  CaseUpdate,
+  FraudAlert,
+  FraudHeatMapPoint,
+  IntelligenceActivity,
+  RiskDistributionPoint,
+  TrendPoint,
+  UserRiskProfile,
+  UserRole
+} from "../types";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || ""
@@ -75,6 +90,41 @@ export async function addCaseNote(caseId: string | number, note: string) {
 export async function getIntelligenceActivity(limit = 30) {
   const response = await api.get<IntelligenceActivity>("/intelligence/activity", { params: { limit } });
   return response.data;
+}
+
+export async function getAnalyticsOverview() {
+  const response = await api.get<AnalyticsOverview>("/analytics/overview");
+  return response.data;
+}
+
+export async function getAnalyticsTrends() {
+  const response = await api.get<TrendPoint[]>("/analytics/trends");
+  return response.data;
+}
+
+export async function getRiskDistribution() {
+  const response = await api.get<RiskDistributionPoint[]>("/analytics/risk-distribution");
+  return response.data;
+}
+
+export async function getAnalystPerformance() {
+  const response = await api.get<AnalystPerformance[]>("/analytics/analyst-performance");
+  return response.data;
+}
+
+export async function getFraudHeatMap() {
+  const response = await api.get<FraudHeatMapPoint[]>("/analytics/heat-map");
+  return response.data;
+}
+
+export async function downloadExport(path: string, filename: string) {
+  const response = await api.get<Blob>(path, { responseType: "blob" });
+  const url = URL.createObjectURL(response.data);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 export function getFraudSocketUrl() {

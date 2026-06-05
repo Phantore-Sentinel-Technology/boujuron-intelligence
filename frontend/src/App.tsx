@@ -3,6 +3,7 @@ import { AppShell } from "./components/AppShell";
 import { Dashboard } from "./pages/Dashboard";
 import { Activity } from "./pages/Activity";
 import { Analytics } from "./pages/Analytics";
+import { Executive } from "./pages/Executive";
 import { Alerts } from "./pages/Alerts";
 import { Cases } from "./pages/Cases";
 import { CaseDetail } from "./pages/CaseDetail";
@@ -41,6 +42,7 @@ function AuthenticatedApp() {
       <Routes>
         <Route path="/" element={<Dashboard {...fraud} />} />
         <Route path="/activity" element={<Activity />} />
+        <Route path="/executive" element={<Executive />} />
         <Route path="/analytics" element={<Analytics alerts={fraud.alerts} stats={fraud.stats} />} />
         <Route path="/alerts" element={<Alerts alerts={fraud.topAlerts} loading={fraud.loading} />} />
         <Route path="/cases" element={<Cases />} />

@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Activity, Bell, BriefcaseBusiness, Gauge, LayoutDashboard, LogOut, Moon, Settings, ShieldCheck, Sun, Users } from "lucide-react";
+import { Activity, BarChart3, Bell, BriefcaseBusiness, Gauge, LayoutDashboard, LogOut, Moon, Settings, ShieldCheck, Sun, Users } from "lucide-react";
 import type { PropsWithChildren } from "react";
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -10,6 +10,7 @@ import { getIntelligenceActivity } from "../services/api";
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/activity", label: "Live Feed", icon: Activity },
+  { to: "/executive", label: "Executive", icon: BarChart3 },
   { to: "/analytics", label: "Analytics", icon: Activity },
   { to: "/alerts", label: "Alerts", icon: Bell },
   { to: "/cases", label: "Cases", icon: BriefcaseBusiness },

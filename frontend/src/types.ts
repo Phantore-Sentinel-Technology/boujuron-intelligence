@@ -166,3 +166,38 @@ export interface IntelligenceActivity {
   notifications: NotificationItem[];
   feed: InvestigationFeedItem[];
 }
+
+export interface AnalyticsOverview {
+  total_events: number;
+  fraud_alerts: number;
+  confirmed_fraud_cases: number;
+  fraud_prevention_rate: number;
+  false_positive_rate: number;
+  average_investigation_minutes: number;
+  cases_resolved: number;
+}
+
+export interface TrendPoint {
+  label: string;
+  value: number;
+}
+
+export interface RiskDistributionPoint {
+  level: RiskLevel;
+  count: number;
+}
+
+export interface AnalystPerformance {
+  analyst: string;
+  assigned_cases: number;
+  resolved_cases: number;
+  confirmed_fraud: number;
+  false_positives: number;
+}
+
+export interface FraudHeatMapPoint {
+  location: string;
+  alerts: number;
+  average_risk: number;
+  highest_risk: RiskLevel;
+}

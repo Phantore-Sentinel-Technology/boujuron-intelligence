@@ -181,3 +181,38 @@ class InvestigationFeedItemResponse(BaseModel):
 class IntelligenceActivityResponse(BaseModel):
     notifications: list[NotificationResponse]
     feed: list[InvestigationFeedItemResponse]
+
+
+class AnalyticsOverviewResponse(BaseModel):
+    total_events: int
+    fraud_alerts: int
+    confirmed_fraud_cases: int
+    fraud_prevention_rate: float
+    false_positive_rate: float
+    average_investigation_minutes: float
+    cases_resolved: int
+
+
+class TrendPointResponse(BaseModel):
+    label: str
+    value: int
+
+
+class RiskDistributionResponse(BaseModel):
+    level: str
+    count: int
+
+
+class AnalystPerformanceResponse(BaseModel):
+    analyst: str
+    assigned_cases: int
+    resolved_cases: int
+    confirmed_fraud: int
+    false_positives: int
+
+
+class FraudHeatMapPointResponse(BaseModel):
+    location: str
+    alerts: int
+    average_risk: float
+    highest_risk: str

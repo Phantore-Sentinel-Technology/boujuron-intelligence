@@ -1,7 +1,9 @@
 import asyncio
 import base64
+import csv
 import hashlib
 import hmac
+import io
 import json
 import os
 import secrets
@@ -12,7 +14,7 @@ from statistics import mean
 
 import psycopg2
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from config.settings import settings
@@ -21,6 +23,8 @@ from services.dashboard_service.schemas import (
     AuthRegisterRequest,
     AuthTokenResponse,
     AuthUserResponse,
+    AnalystPerformanceResponse,
+    AnalyticsOverviewResponse,
     CaseDetailResponse,
     CaseNoteRequest,
     CaseNoteResponse,
@@ -30,11 +34,14 @@ from services.dashboard_service.schemas import (
     EventResponse,
     FraudAlertResponse,
     BehaviorAnomaly,
+    FraudHeatMapPointResponse,
     IntelligenceActivityResponse,
     InvestigationFeedItemResponse,
     NotificationResponse,
     RiskTimelinePoint,
+    RiskDistributionResponse,
     ScoreBreakdownItem,
+    TrendPointResponse,
     UserProfileEvent,
     UserProfileResponse,
 )
@@ -70,6 +77,47 @@ def ensure_auth_tables(cursor):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+
+def ensure_event_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS events (
+            id SERIAL PRIMARY KEY,
+            transaction_id TEXT,
+            user_id TEXT,
+            amount NUMERIC,
+            location TEXT,
+            event_type TEXT,
+            device_type TEXT,
+            network TEXT,
+            ip TEXT,
+            timestamp TIMESTAMP
+        )
+    """)
+    for column_name, column_type in (
+        ("transaction_id", "TEXT"),
+        ("amount", "NUMERIC"),
+        ("location", "TEXT"),
+        ("network", "TEXT"),
+    ):
+        cursor.execute(f"""
+            ALTER TABLE events
+            ADD COLUMN IF NOT EXISTS {column_name} {column_type}
+        """)
+
+
+def ensure_fraud_alert_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fraud_alerts (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT,
+            reason TEXT,
+            risk_score INTEGER,
+            risk_level TEXT,
+            timestamp TIMESTAMP
+        )
+    """)
+    ensure_fraud_alert_columns(cursor)
 
 
 def ensure_case_tables(cursor):
@@ -130,13 +178,65 @@ def ensure_fraud_alert_columns(cursor):
         """)
 
 
+def prepare_analytics_tables(cursor):
+    ensure_event_table(cursor)
+    ensure_fraud_alert_table(cursor)
+    ensure_case_tables(cursor)
+    materialize_cases_from_alerts(cursor)
+
+
+def csv_response(filename: str, headers: list[str], rows: list[tuple]) -> Response:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(headers)
+    writer.writerows(rows)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def simple_pdf(title: str, lines: list[str]) -> bytes:
+    escaped_lines = [line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)") for line in lines]
+    text = [f"BT /F1 18 Tf 72 760 Td ({title}) Tj ET"]
+    y = 724
+    for line in escaped_lines:
+        text.append(f"BT /F1 11 Tf 72 {y} Td ({line}) Tj ET")
+        y -= 18
+        if y < 72:
+            break
+    stream = "\n".join(text).encode("utf-8")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream",
+    ]
+    pdf = io.BytesIO()
+    pdf.write(b"%PDF-1.4\n")
+    offsets = []
+    for index, obj in enumerate(objects, start=1):
+        offsets.append(pdf.tell())
+        pdf.write(f"{index} 0 obj\n".encode("ascii"))
+        pdf.write(obj)
+        pdf.write(b"\nendobj\n")
+    xref = pdf.tell()
+    pdf.write(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("ascii"))
+    for offset in offsets:
+        pdf.write(f"{offset:010d} 00000 n \n".encode("ascii"))
+    pdf.write(f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode("ascii"))
+    return pdf.getvalue()
+
+
 def priority_from_risk(risk_level: str | None) -> str:
     level = (risk_level or "LOW").upper()
     return level if level in CASE_PRIORITIES else "LOW"
 
 
 def materialize_cases_from_alerts(cursor):
-    ensure_fraud_alert_columns(cursor)
+    ensure_fraud_alert_table(cursor)
     cursor.execute("""
         SELECT
             id,
@@ -896,6 +996,220 @@ def add_case_note(case_id: int, payload: CaseNoteRequest, current_user: AuthUser
     conn.commit()
     conn.close()
     return get_case(case_id, current_user)
+
+
+@app.get("/analytics/overview", response_model=AnalyticsOverviewResponse)
+def analytics_overview(current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    prepare_analytics_tables(cursor)
+    conn.commit()
+
+    cursor.execute("SELECT COUNT(*) FROM events")
+    total_events = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM fraud_alerts")
+    fraud_alerts = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM cases WHERE analyst_feedback = 'TRUE_FRAUD'")
+    confirmed = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM cases WHERE analyst_feedback = 'FALSE_POSITIVE'")
+    false_positive = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM cases WHERE status = 'RESOLVED'")
+    resolved = cursor.fetchone()[0]
+    cursor.execute("""
+        SELECT AVG(EXTRACT(EPOCH FROM (COALESCE(resolved_at, updated_at) - created_at)) / 60)
+        FROM cases
+        WHERE status IN ('RESOLVED', 'ARCHIVED')
+    """)
+    avg_minutes = cursor.fetchone()[0] or 0
+    cursor.execute("SELECT COUNT(*) FROM cases WHERE decision IN ('BLOCK', 'FREEZE', 'ESCALATE') OR COALESCE(actual_loss, 0) = 0")
+    prevented = cursor.fetchone()[0]
+    conn.close()
+
+    prevention_rate = round((prevented / fraud_alerts) * 100, 1) if fraud_alerts else 0
+    false_positive_rate = round((false_positive / max(confirmed + false_positive, 1)) * 100, 1)
+    return AnalyticsOverviewResponse(
+        total_events=total_events,
+        fraud_alerts=fraud_alerts,
+        confirmed_fraud_cases=confirmed,
+        fraud_prevention_rate=prevention_rate,
+        false_positive_rate=false_positive_rate,
+        average_investigation_minutes=round(float(avg_minutes), 1),
+        cases_resolved=resolved,
+    )
+
+
+@app.get("/analytics/trends", response_model=list[TrendPointResponse])
+def analytics_trends(current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    prepare_analytics_tables(cursor)
+    conn.commit()
+    cursor.execute("""
+        SELECT COALESCE(DATE(timestamp)::TEXT, 'Unknown') AS day, COUNT(*)
+        FROM fraud_alerts
+        GROUP BY day
+        ORDER BY day
+        LIMIT 30
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [TrendPointResponse(label=r[0], value=r[1]) for r in rows]
+
+
+@app.get("/analytics/risk-distribution", response_model=list[RiskDistributionResponse])
+def analytics_risk_distribution(current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    prepare_analytics_tables(cursor)
+    conn.commit()
+    cursor.execute("""
+        SELECT risk_level, COUNT(*)
+        FROM fraud_alerts
+        GROUP BY risk_level
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    counts = {r[0] or "LOW": r[1] for r in rows}
+    return [RiskDistributionResponse(level=level, count=counts.get(level, 0)) for level in ("LOW", "MEDIUM", "HIGH", "CRITICAL")]
+
+
+@app.get("/analytics/analyst-performance", response_model=list[AnalystPerformanceResponse])
+def analytics_analyst_performance(current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    prepare_analytics_tables(cursor)
+    conn.commit()
+    cursor.execute("""
+        SELECT
+            COALESCE(assigned_to, 'Unassigned') AS analyst,
+            COUNT(*) AS assigned_cases,
+            COUNT(*) FILTER (WHERE status IN ('RESOLVED', 'ARCHIVED')) AS resolved_cases,
+            COUNT(*) FILTER (WHERE analyst_feedback = 'TRUE_FRAUD') AS confirmed_fraud,
+            COUNT(*) FILTER (WHERE analyst_feedback = 'FALSE_POSITIVE') AS false_positives
+        FROM cases
+        GROUP BY analyst
+        ORDER BY assigned_cases DESC
+        LIMIT 12
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        AnalystPerformanceResponse(
+            analyst=r[0],
+            assigned_cases=r[1],
+            resolved_cases=r[2],
+            confirmed_fraud=r[3],
+            false_positives=r[4],
+        )
+        for r in rows
+    ]
+
+
+@app.get("/analytics/heat-map", response_model=list[FraudHeatMapPointResponse])
+def analytics_heat_map(current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    prepare_analytics_tables(cursor)
+    conn.commit()
+    cursor.execute("""
+        SELECT
+            COALESCE(NULLIF(e.location, ''), 'Unknown') AS location,
+            COUNT(DISTINCT f.id) AS alerts,
+            COALESCE(AVG(f.risk_score), 0) AS average_risk,
+            COALESCE(MAX(f.risk_level), 'LOW') AS highest_risk
+        FROM fraud_alerts f
+        LEFT JOIN events e ON e.user_id = f.user_id
+        GROUP BY location
+        ORDER BY alerts DESC, average_risk DESC
+        LIMIT 16
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        FraudHeatMapPointResponse(location=r[0], alerts=r[1], average_risk=round(float(r[2]), 1), highest_risk=r[3])
+        for r in rows
+    ]
+
+
+@app.get("/export/fraud-alerts.csv")
+def export_fraud_alerts(current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    prepare_analytics_tables(cursor)
+    conn.commit()
+    cursor.execute("""
+        SELECT user_id, risk_score, risk_level, recommended_action, confidence, timestamp
+        FROM fraud_alerts
+        ORDER BY timestamp DESC NULLS LAST, id DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return csv_response("fraud-alerts.csv", ["user_id", "risk_score", "risk_level", "action", "confidence", "time"], rows)
+
+
+@app.get("/export/cases.csv")
+def export_cases(current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    prepare_analytics_tables(cursor)
+    conn.commit()
+    cursor.execute("""
+        SELECT case_number, user_id, risk_score, risk_level, status, priority, assigned_to, analyst_feedback, decision, potential_loss, actual_loss, created_at, updated_at
+        FROM cases
+        ORDER BY updated_at DESC, id DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return csv_response(
+        "cases.csv",
+        ["case_number", "user_id", "risk_score", "risk_level", "status", "priority", "assigned_to", "analyst_feedback", "decision", "potential_loss", "actual_loss", "created_at", "updated_at"],
+        rows,
+    )
+
+
+@app.get("/export/monthly-report.csv")
+def export_monthly_report(current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    prepare_analytics_tables(cursor)
+    conn.commit()
+    cursor.execute("""
+        SELECT
+            COALESCE(DATE_TRUNC('month', created_at)::DATE::TEXT, 'Unknown') AS month,
+            COUNT(*) AS cases,
+            COUNT(*) FILTER (WHERE analyst_feedback = 'TRUE_FRAUD') AS confirmed_fraud,
+            COUNT(*) FILTER (WHERE analyst_feedback = 'FALSE_POSITIVE') AS false_positives,
+            COUNT(*) FILTER (WHERE status IN ('RESOLVED', 'ARCHIVED')) AS resolved
+        FROM cases
+        GROUP BY month
+        ORDER BY month DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return csv_response("monthly-report.csv", ["month", "cases", "confirmed_fraud", "false_positives", "resolved"], rows)
+
+
+@app.get("/reports/monthly.pdf")
+def monthly_pdf_report(current_user: AuthUserResponse = Depends(get_current_user)):
+    overview = analytics_overview(current_user)
+    heat = analytics_heat_map(current_user)[:5]
+    lines = [
+        "Boujuron Intelligence Monthly Fraud Report",
+        f"Generated for: {current_user.name} ({current_user.role})",
+        "",
+        f"Events Analyzed: {overview.total_events:,}",
+        f"Fraud Alerts: {overview.fraud_alerts:,}",
+        f"Confirmed Fraud Cases: {overview.confirmed_fraud_cases:,}",
+        f"Fraud Prevention Rate: {overview.fraud_prevention_rate}%",
+        f"False Positive Rate: {overview.false_positive_rate}%",
+        f"Average Investigation Time: {overview.average_investigation_minutes} minutes",
+        f"Cases Resolved: {overview.cases_resolved:,}",
+        "",
+        "Top Attack Locations:",
+        *[f"- {item.location}: {item.alerts} alerts, avg risk {item.average_risk}" for item in heat],
+        "",
+        "Recommendations:",
+        "- Review critical-risk locations and anonymous-network activity.",
+        "- Prioritize cases with confirmed fraud feedback for model retraining.",
+        "- Track false positives weekly to improve analyst workload quality.",
+    ]
+    return Response(
+        content=simple_pdf("Boujuron Intelligence", lines),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="monthly-fraud-report.pdf"'},
+    )
 
 
 @app.get("/ml-features")
