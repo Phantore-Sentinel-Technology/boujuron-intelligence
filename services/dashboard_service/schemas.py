@@ -15,6 +15,21 @@ class AuthLoginRequest(BaseModel):
     password: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ForgotPasswordResponse(BaseModel):
+    message: str
+    reset_token: str | None = None
+    reset_url: str | None = None
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    password: str
+
+
 class AuthUserResponse(BaseModel):
     id: int
     name: str

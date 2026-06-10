@@ -49,6 +49,16 @@ export async function register(name: string, email: string, password: string, ro
   return response.data;
 }
 
+export async function forgotPassword(email: string) {
+  const response = await api.post<{ message: string; reset_token?: string | null; reset_url?: string | null }>("/auth/forgot-password", { email });
+  return response.data;
+}
+
+export async function resetPassword(token: string, password: string) {
+  const response = await api.post<{ message: string }>("/auth/reset-password", { token, password });
+  return response.data;
+}
+
 export async function getCurrentUser() {
   const response = await api.get<AuthUser>("/auth/me");
   return response.data;

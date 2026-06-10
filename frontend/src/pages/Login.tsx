@@ -53,6 +53,7 @@ export function Login() {
             <span>Password</span>
             <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required />
           </label>
+          <Link className="forgot-link" to="/forgot-password">Forgot password?</Link>
           {error && <p className="form-error">{error}</p>}
           <button className="primary-button" disabled={submitting}>
             <LogIn size={18} />

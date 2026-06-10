@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: boujuron-api
+    env: docker
+    dockerfilePath: ./Dockerfile
+    startCommand: uvicorn services.dashboard_service.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: KAFKA_BOOTSTRAP_SERVER
+        value: ""
+      - key: RISK_ENGINE_API
+        value: ""

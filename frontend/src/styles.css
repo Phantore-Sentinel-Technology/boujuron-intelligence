@@ -725,7 +725,29 @@ dd {
   text-align: center;
 }
 
-.auth-switch a, .back-link {
+.auth-switch a, .back-link, .forgot-link {
+  color: #38bdf8;
+  text-decoration: none;
+  font-weight: 800;
+}
+
+.forgot-link {
+  justify-self: end;
+  font-size: 13px;
+}
+
+.reset-link-box {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #94a3b8;
+  padding: 10px;
+  overflow-wrap: anywhere;
+}
+
+.reset-link-box a {
   color: #38bdf8;
   text-decoration: none;
   font-weight: 800;
@@ -1564,6 +1586,12 @@ dd {
 
 :root[data-theme="light"] .note-item p {
   color: #334155;
+}
+
+:root[data-theme="light"] .reset-link-box {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #64748b;
 }
 
 :root[data-theme="light"] th,

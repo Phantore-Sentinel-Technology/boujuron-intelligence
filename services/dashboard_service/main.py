@@ -9,11 +9,12 @@ import os
 import secrets
 import time
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta
 from statistics import mean
 
 import psycopg2
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -32,6 +33,8 @@ from services.dashboard_service.schemas import (
     CaseTimelineResponse,
     CaseUpdateRequest,
     EventResponse,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
     FraudAlertResponse,
     BehaviorAnomaly,
     FraudHeatMapPointResponse,
@@ -40,6 +43,7 @@ from services.dashboard_service.schemas import (
     NotificationResponse,
     RiskTimelinePoint,
     RiskDistributionResponse,
+    ResetPasswordRequest,
     ScoreBreakdownItem,
     TrendPointResponse,
     UserProfileEvent,
@@ -50,13 +54,22 @@ app = FastAPI(title="Boujuron Dashboard API")
 
 clients = []
 FRONTEND_DIST = Path("frontend/dist")
-AUTH_SECRET = os.getenv("JWT_SECRET", "boujuron-local-development-secret")
+AUTH_SECRET = settings.JWT_SECRET
 TOKEN_TTL_SECONDS = 60 * 60 * 12
+PASSWORD_RESET_TTL_MINUTES = 60
 ALLOWED_ROLES = {"Admin", "Fraud Analyst", "Investigator", "Read-Only Auditor"}
 CASE_STATUSES = {"NEW", "ASSIGNED", "INVESTIGATING", "ESCALATED", "RESOLVED", "ARCHIVED"}
 CASE_PRIORITIES = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
 ANALYST_FEEDBACK = {"TRUE_FRAUD", "FALSE_POSITIVE", "NEEDS_REVIEW"}
 CASE_DECISIONS = {"ALLOW", "VERIFY", "BLOCK", "FREEZE", "ESCALATE"}
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 if (FRONTEND_DIST / "assets").exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
@@ -74,6 +87,16 @@ def ensure_auth_tables(cursor):
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             role TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES app_users(id) ON DELETE CASCADE,
+            token TEXT UNIQUE NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            used_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -525,6 +548,63 @@ def login(payload: AuthLoginRequest):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     user = AuthUserResponse(id=row[0], name=row[1], email=row[2], role=row[3])
     return AuthTokenResponse(access_token=create_token(user), user=user)
+
+
+@app.post("/auth/forgot-password", response_model=ForgotPasswordResponse)
+def forgot_password(payload: ForgotPasswordRequest):
+    conn, cursor = get_db()
+    ensure_auth_tables(cursor)
+    cursor.execute("SELECT id FROM app_users WHERE email = %s", (payload.email.lower(),))
+    row = cursor.fetchone()
+
+    if not row:
+        conn.close()
+        return ForgotPasswordResponse(message="If the email exists, a reset link has been generated.")
+
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(minutes=PASSWORD_RESET_TTL_MINUTES)
+    cursor.execute("""
+        INSERT INTO password_reset_tokens (user_id, token, expires_at)
+        VALUES (%s, %s, %s)
+    """, (row[0], token, expires_at))
+    conn.commit()
+    conn.close()
+
+    reset_url = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?token={token}"
+    return ForgotPasswordResponse(
+        message="Password reset link generated.",
+        reset_token=token if settings.ENVIRONMENT != "production" else None,
+        reset_url=reset_url if settings.ENVIRONMENT != "production" else None,
+    )
+
+
+@app.post("/auth/reset-password")
+def reset_password(payload: ResetPasswordRequest):
+    if len(payload.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    conn, cursor = get_db()
+    ensure_auth_tables(cursor)
+    cursor.execute("""
+        SELECT id, user_id, expires_at, used_at
+        FROM password_reset_tokens
+        WHERE token = %s
+    """, (payload.token,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Invalid reset token")
+
+    token_id, user_id, expires_at, used_at = row
+    if used_at is not None or expires_at < datetime.utcnow():
+        conn.close()
+        raise HTTPException(status_code=400, detail="Reset token has expired")
+
+    cursor.execute("UPDATE app_users SET password_hash = %s WHERE id = %s", (hash_password(payload.password), user_id))
+    cursor.execute("UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = %s", (token_id,))
+    conn.commit()
+    conn.close()
+    return {"message": "Password reset successfully"}
 
 
 @app.get("/auth/me", response_model=AuthUserResponse)

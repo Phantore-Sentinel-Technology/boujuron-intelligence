@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
 
     # Kafka
-    KAFKA_BOOTSTRAP_SERVER: str
+    KAFKA_BOOTSTRAP_SERVER: str = ""
     KAFKA_TOPIC_EVENTS: str = "user_events"
 
     KAFKA_API_KEY: Optional[str] = None
@@ -27,7 +27,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str
 
     # Services
-    RISK_ENGINE_API: str
+    RISK_ENGINE_API: str = ""
+    FRONTEND_URL: str = "http://localhost:5173"
+    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:4173,http://localhost:8002"
+    JWT_SECRET: str = "boujuron-local-development-secret"
 
     API_KEY: Optional[str] = None
 
