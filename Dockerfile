@@ -12,9 +12,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY requirements-dashboard.txt .
 
-RUN pip install --default-timeout=1000 --no-cache-dir -r requirements.txt
+RUN pip install --default-timeout=1000 --no-cache-dir -r requirements-dashboard.txt
 
 COPY . .
 COPY --from=frontend-build /frontend/dist /app/frontend/dist
@@ -22,3 +22,5 @@ COPY --from=frontend-build /frontend/dist /app/frontend/dist
 ENV PYTHONPATH=/app
 
 EXPOSE 8000
+
+CMD ["sh", "-c", "uvicorn services.dashboard_service.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

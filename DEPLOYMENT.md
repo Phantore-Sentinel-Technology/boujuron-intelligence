@@ -23,14 +23,16 @@ Recommended settings:
 uvicorn services.dashboard_service.main:app --host 0.0.0.0 --port $PORT
 ```
 
+The Dockerfile uses `requirements-dashboard.txt`, a slim dependency set for the deployed dashboard API. This keeps Render builds much faster than installing the full local ML stack.
+
 Environment variables:
 
 ```text
 ENVIRONMENT=production
 DATABASE_URL=<your Neon pooled PostgreSQL URL>
 JWT_SECRET=<long random secret>
-FRONTEND_URL=https://<your-vercel-app>.vercel.app
-CORS_ORIGINS=https://<your-vercel-app>.vercel.app
+FRONTEND_URL=https://<your-netlify-app>.netlify.app
+CORS_ORIGINS=https://<your-netlify-app>.netlify.app
 KAFKA_BOOTSTRAP_SERVER=
 RISK_ENGINE_API=
 ```
@@ -41,13 +43,19 @@ After deploy, copy the Render service URL. Example:
 https://boujuron-api.onrender.com
 ```
 
-## 3. Frontend: Vercel
+Quick health check:
 
-Create a Vercel project using the `frontend` folder as the project root.
+```text
+https://<your-render-api>.onrender.com/health
+```
+
+## 3. Frontend: Netlify
+
+Create a Netlify site using the `frontend` folder as the base directory.
 
 Recommended settings:
 
-- Framework preset: Vite
+- Base directory: `frontend`
 - Build command: `npm run build`
 - Output directory: `dist`
 
@@ -58,20 +66,21 @@ VITE_API_URL=https://<your-render-api>.onrender.com
 VITE_WS_URL=wss://<your-render-api>.onrender.com/ws/fraud
 ```
 
-The `frontend/vercel.json` file handles React Router refreshes.
+The `frontend/public/_redirects` file handles React Router refreshes.
 
-## 4. Frontend: Netlify Alternative
+## 4. Frontend: Vercel Alternative
 
-Use the `frontend` folder as the base directory.
+Use the `frontend` folder as the project root.
 
 Settings:
 
+- Framework preset: Vite
 - Build command: `npm run build`
-- Publish directory: `frontend/dist`
+- Output directory: `dist`
 
 Environment variables are the same as Vercel.
 
-The `frontend/public/_redirects` file handles React Router refreshes.
+The `frontend/vercel.json` file handles React Router refreshes.
 
 ## 5. Password Reset
 

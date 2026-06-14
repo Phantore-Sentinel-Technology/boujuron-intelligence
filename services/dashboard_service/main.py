@@ -620,6 +620,11 @@ def serve_dashboard():
     html_path = Path("dashboard.html")
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "boujuron-dashboard-api"}
+
 @app.websocket("/ws/fraud")
 async def ws_fraud(websocket: WebSocket):
     await websocket.accept()
