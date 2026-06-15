@@ -59,7 +59,7 @@ export function Login() {
             <LogIn size={18} />
             {submitting ? "Signing in..." : "Sign in"}
           </button>
-          <p className="auth-switch">New team member? <Link to="/register">Create an account</Link></p>
+          <p className="auth-switch">Need access? Ask an administrator for an invite link.</p>
         </form>
       </section>
     </main>

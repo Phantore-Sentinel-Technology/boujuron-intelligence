@@ -471,6 +471,12 @@ tbody tr:hover {
   font-style: normal;
 }
 
+.auth-note {
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .legend-row {
   display: flex;
   gap: 12px;
@@ -1341,7 +1347,7 @@ dd {
 }
 
 .case-tools select, .filter-select select, .case-control-panel select,
-.case-control-panel input, .note-form textarea {
+.case-control-panel input, .note-form textarea, .invite-form input, .invite-form select {
   border: 1px solid #334155;
   border-radius: 8px;
   background: #0f172a;
@@ -1556,6 +1562,93 @@ dd {
   font-size: 12px;
 }
 
+.access-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.invite-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.45fr) minmax(150px, 0.35fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.invite-form label {
+  display: grid;
+  gap: 7px;
+}
+
+.invite-form label span,
+.invite-result span,
+.invite-row span {
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.invite-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: center;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  padding: 13px;
+}
+
+.invite-result span,
+.invite-result strong {
+  grid-column: 1 / 2;
+}
+
+.invite-result strong {
+  overflow-wrap: anywhere;
+}
+
+.invite-result button {
+  grid-column: 2;
+  grid-row: 1 / 3;
+}
+
+.invite-list {
+  display: grid;
+  gap: 10px;
+}
+
+.invite-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  padding: 12px;
+}
+
+.invite-row strong,
+.invite-row span {
+  display: block;
+}
+
+.invite-status {
+  justify-self: start;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  padding: 6px 10px;
+}
+
+.invite-status.active {
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.42);
+}
+
+.invite-status.used {
+  color: #94a3b8;
+}
+
 :root[data-theme="light"] {
   color-scheme: light;
   background: #f8fafc;
@@ -1626,7 +1719,9 @@ dd {
 :root[data-theme="light"] .timeline-item,
 :root[data-theme="light"] .breakdown-item,
 :root[data-theme="light"] .chip-list span,
-:root[data-theme="light"] .trend {
+:root[data-theme="light"] .trend,
+:root[data-theme="light"] .invite-result,
+:root[data-theme="light"] .invite-row {
   background: #f8fafc;
   border-color: #cbd5e1;
   color: #0f172a;
@@ -1665,7 +1760,9 @@ dd {
 :root[data-theme="light"] .filter-select select,
 :root[data-theme="light"] .case-control-panel select,
 :root[data-theme="light"] .case-control-panel input,
-:root[data-theme="light"] .note-form textarea {
+:root[data-theme="light"] .note-form textarea,
+:root[data-theme="light"] .invite-form input,
+:root[data-theme="light"] .invite-form select {
   background: #ffffff;
   border-color: #cbd5e1;
   color: #0f172a;
@@ -1694,7 +1791,11 @@ dd {
 :root[data-theme="light"] .filter-select span,
 :root[data-theme="light"] .case-control-panel label span,
 :root[data-theme="light"] .recommended-box span,
-:root[data-theme="light"] .note-item time {
+:root[data-theme="light"] .note-item time,
+:root[data-theme="light"] .invite-form label span,
+:root[data-theme="light"] .invite-result span,
+:root[data-theme="light"] .invite-row span,
+:root[data-theme="light"] .auth-note {
   color: #64748b;
 }
 
@@ -2030,8 +2131,18 @@ dd {
   .profile-grid.wide,
   .executive-kpi-grid,
   .workflow-strip,
-  .case-form-grid {
+  .case-form-grid,
+  .invite-form,
+  .invite-row,
+  .invite-result {
     grid-template-columns: 1fr;
+  }
+
+  .invite-result span,
+  .invite-result strong,
+  .invite-result button {
+    grid-column: auto;
+    grid-row: auto;
   }
 
   .stat-card,

@@ -8,6 +8,7 @@ class AuthRegisterRequest(BaseModel):
     email: str
     password: str
     role: UserRole = "Fraud Analyst"
+    invite_token: str
 
 
 class AuthLoginRequest(BaseModel):
@@ -41,6 +42,24 @@ class AuthTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: AuthUserResponse
+
+
+class InviteCreateRequest(BaseModel):
+    email: str
+    role: UserRole = "Read-Only Auditor"
+    expires_in_hours: int = 72
+
+
+class InviteResponse(BaseModel):
+    id: int
+    token: str
+    invite_url: str
+    email: str
+    role: UserRole
+    expires_at: str
+    used_at: str | None = None
+    created_by: str | None = None
+    created_at: str
 
 
 class EventResponse(BaseModel):

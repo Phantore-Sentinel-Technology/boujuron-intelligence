@@ -36,6 +36,18 @@ export interface AuthResponse {
   user: AuthUser;
 }
 
+export interface InviteToken {
+  id: number;
+  token: string;
+  invite_url: string;
+  email: string;
+  role: UserRole;
+  expires_at: string;
+  used_at?: string | null;
+  created_by?: string | null;
+  created_at: string;
+}
+
 export interface ScoreBreakdownItem {
   label: string;
   points: number;

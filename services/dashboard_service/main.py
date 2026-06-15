@@ -36,6 +36,8 @@ from services.dashboard_service.schemas import (
     EventResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
+    InviteCreateRequest,
+    InviteResponse,
     FraudAlertResponse,
     BehaviorAnomaly,
     FraudHeatMapPointResponse,
@@ -116,6 +118,19 @@ def ensure_auth_tables(cursor):
             token TEXT UNIQUE NOT NULL,
             expires_at TIMESTAMP NOT NULL,
             used_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS invite_tokens (
+            id SERIAL PRIMARY KEY,
+            token TEXT UNIQUE NOT NULL,
+            email TEXT NOT NULL,
+            role TEXT NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            used_at TIMESTAMP,
+            used_by INTEGER REFERENCES app_users(id) ON DELETE SET NULL,
+            created_by INTEGER REFERENCES app_users(id) ON DELETE SET NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -394,6 +409,20 @@ def create_token(user: AuthUserResponse) -> str:
     return f"{signing_input}.{_b64(signature)}"
 
 
+def create_invite_token() -> str:
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    groups = ["".join(secrets.choice(alphabet) for _ in range(4)) for _ in range(3)]
+    return f"BJRN-{'-'.join(groups)}"
+
+
+def invite_url(token: str) -> str:
+    base_url = settings.FRONTEND_URL.rstrip("/")
+    for suffix in ("/login", "/register"):
+        if base_url.endswith(suffix):
+            base_url = base_url[: -len(suffix)]
+    return f"{base_url}/register?invite={token}"
+
+
 def decode_token(token: str) -> dict:
     try:
         signing_input, signature = token.rsplit(".", 1)
@@ -420,6 +449,11 @@ def get_current_user(authorization: str | None = Header(default=None)) -> AuthUs
     if not row:
         raise HTTPException(status_code=401, detail="User no longer exists")
     return AuthUserResponse(id=row[0], name=row[1], email=row[2], role=row[3])
+
+
+def require_admin(current_user: AuthUserResponse):
+    if current_user.role != "Admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
 
 
 def parse_reasons(reason: str | None) -> list[str]:
@@ -540,14 +574,96 @@ def notification_from_row(row) -> NotificationResponse:
     )
 
 
+def invite_response(row) -> InviteResponse:
+    invite_id, token, email, role, expires_at, used_at, created_by, created_at = row
+    return InviteResponse(
+        id=invite_id,
+        token=token,
+        invite_url=invite_url(token),
+        email=email,
+        role=role,
+        expires_at=str(expires_at),
+        used_at=str(used_at) if used_at else None,
+        created_by=created_by,
+        created_at=str(created_at),
+    )
+
+
+@app.post("/auth/invites", response_model=InviteResponse)
+def create_invite(payload: InviteCreateRequest, current_user: AuthUserResponse = Depends(get_current_user)):
+    require_admin(current_user)
+    role = payload.role if payload.role in ALLOWED_ROLES else "Read-Only Auditor"
+    expires_in_hours = min(max(payload.expires_in_hours, 1), 720)
+    conn, cursor = get_db()
+    ensure_auth_tables(cursor)
+    token = create_invite_token()
+    expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
+    cursor.execute("""
+        INSERT INTO invite_tokens (token, email, role, expires_at, created_by)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING id, token, email, role, expires_at, used_at, %s AS created_by, created_at
+    """, (token, payload.email.lower(), role, expires_at, current_user.id, current_user.name))
+    row = cursor.fetchone()
+    conn.commit()
+    conn.close()
+    return invite_response(row)
+
+
+@app.get("/auth/invites", response_model=list[InviteResponse])
+def list_invites(current_user: AuthUserResponse = Depends(get_current_user)):
+    require_admin(current_user)
+    conn, cursor = get_db()
+    ensure_auth_tables(cursor)
+    cursor.execute("""
+        SELECT
+            i.id,
+            i.token,
+            i.email,
+            i.role,
+            i.expires_at,
+            i.used_at,
+            u.name AS created_by,
+            i.created_at
+        FROM invite_tokens i
+        LEFT JOIN app_users u ON u.id = i.created_by
+        ORDER BY i.created_at DESC
+        LIMIT 50
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [invite_response(row) for row in rows]
+
+
 @app.post("/auth/register", response_model=AuthTokenResponse)
 def register(payload: AuthRegisterRequest):
-    role = payload.role if payload.role in ALLOWED_ROLES else "Fraud Analyst"
     if len(payload.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
     conn, cursor = get_db()
     ensure_auth_tables(cursor)
+    invite_token = payload.invite_token.strip().upper()
+    cursor.execute("""
+        SELECT id, email, role, expires_at, used_at
+        FROM invite_tokens
+        WHERE token = %s
+    """, (invite_token,))
+    invite = cursor.fetchone()
+    if not invite:
+        conn.close()
+        raise HTTPException(status_code=403, detail="A valid invite token is required")
+
+    invite_id, invite_email, invite_role, expires_at, used_at = invite
+    if used_at is not None:
+        conn.close()
+        raise HTTPException(status_code=403, detail="Invite token has already been used")
+    if expires_at < datetime.utcnow():
+        conn.close()
+        raise HTTPException(status_code=403, detail="Invite token has expired")
+    if invite_email.lower() != payload.email.lower():
+        conn.close()
+        raise HTTPException(status_code=403, detail="Invite token is not valid for this email")
+
+    role = invite_role if invite_role in ALLOWED_ROLES else "Read-Only Auditor"
     cursor.execute("SELECT id FROM app_users WHERE email = %s", (payload.email.lower(),))
     if cursor.fetchone():
         conn.close()
@@ -559,6 +675,11 @@ def register(payload: AuthRegisterRequest):
         RETURNING id, name, email, role
     """, (payload.name.strip(), payload.email.lower(), hash_password(payload.password), role))
     row = cursor.fetchone()
+    cursor.execute("""
+        UPDATE invite_tokens
+        SET used_at = CURRENT_TIMESTAMP, used_by = %s
+        WHERE id = %s
+    """, (row[0], invite_id))
     conn.commit()
     conn.close()
     user = AuthUserResponse(id=row[0], name=row[1], email=row[2], role=row[3])

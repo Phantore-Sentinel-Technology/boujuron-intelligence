@@ -10,6 +10,7 @@ import type {
   FraudAlert,
   FraudHeatMapPoint,
   IntelligenceActivity,
+  InviteToken,
   RiskDistributionPoint,
   TrendPoint,
   UserRiskProfile,
@@ -44,8 +45,18 @@ export async function login(email: string, password: string) {
   return response.data;
 }
 
-export async function register(name: string, email: string, password: string, role: UserRole) {
-  const response = await api.post<AuthResponse>("/auth/register", { name, email, password, role });
+export async function register(name: string, email: string, password: string, role: UserRole, inviteToken: string) {
+  const response = await api.post<AuthResponse>("/auth/register", { name, email, password, role, invite_token: inviteToken });
+  return response.data;
+}
+
+export async function createInvite(email: string, role: UserRole, expiresInHours: number) {
+  const response = await api.post<InviteToken>("/auth/invites", { email, role, expires_in_hours: expiresInHours });
+  return response.data;
+}
+
+export async function getInvites() {
+  const response = await api.get<InviteToken[]>("/auth/invites");
   return response.data;
 }
 

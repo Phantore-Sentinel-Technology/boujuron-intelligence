@@ -1,17 +1,14 @@
 import { FormEvent, useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { ShieldPlus } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import type { UserRole } from "../types";
-
-const roles: UserRole[] = ["Admin", "Fraud Analyst", "Investigator", "Read-Only Auditor"];
-
 export function Register() {
   const { user, register } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<UserRole>("Fraud Analyst");
+  const [searchParams] = useSearchParams();
+  const [inviteToken, setInviteToken] = useState(searchParams.get("invite") || "");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -24,13 +21,13 @@ export function Register() {
     setSubmitting(true);
     setError("");
     try {
-      await register(name, email, password, role);
+      await register(name, email, password, "Read-Only Auditor", inviteToken);
       setSuccess(true);
       window.setTimeout(() => {
         navigate("/login", { replace: true, state: { registeredEmail: email } });
       }, 1400);
     } catch {
-      setError("Could not create account. Check the details and try again.");
+      setError("Could not create account. Check your invite token, email, and password.");
     } finally {
       setSubmitting(false);
     }
@@ -49,6 +46,10 @@ export function Register() {
 
         <form className="auth-form" onSubmit={onSubmit}>
           <label>
+            <span>Invite Token</span>
+            <input value={inviteToken} onChange={(event) => setInviteToken(event.target.value.toUpperCase())} placeholder="BJRN-XXXX-XXXX-XXXX" required />
+          </label>
+          <label>
             <span>Name</span>
             <input value={name} onChange={(event) => setName(event.target.value)} required />
           </label>
@@ -60,13 +61,8 @@ export function Register() {
             <span>Password</span>
             <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" minLength={8} required />
           </label>
-          <label>
-            <span>Role</span>
-            <select value={role} onChange={(event) => setRole(event.target.value as UserRole)}>
-              {roles.map((item) => <option key={item}>{item}</option>)}
-            </select>
-          </label>
           {error && <p className="form-error">{error}</p>}
+          <p className="auth-note">Registration is invite-only. Your role is assigned by the invite.</p>
           <button className="primary-button" disabled={submitting}>
             <ShieldPlus size={18} />
             {submitting ? "Creating..." : "Create account"}
