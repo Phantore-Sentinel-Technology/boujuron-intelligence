@@ -47,7 +47,7 @@ class AuthTokenResponse(BaseModel):
 class InviteCreateRequest(BaseModel):
     email: str
     role: UserRole = "Read-Only Auditor"
-    expires_in_hours: int = 72
+    expires_in_hours: int = 24
 
 
 class InviteResponse(BaseModel):

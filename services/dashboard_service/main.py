@@ -593,7 +593,7 @@ def invite_response(row) -> InviteResponse:
 def create_invite(payload: InviteCreateRequest, current_user: AuthUserResponse = Depends(get_current_user)):
     require_admin(current_user)
     role = payload.role if payload.role in ALLOWED_ROLES else "Read-Only Auditor"
-    expires_in_hours = min(max(payload.expires_in_hours, 1), 720)
+    expires_in_hours = min(max(payload.expires_in_hours, 1), 24)
     conn, cursor = get_db()
     ensure_auth_tables(cursor)
     token = create_invite_token()

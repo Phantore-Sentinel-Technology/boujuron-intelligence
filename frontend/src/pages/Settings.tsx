@@ -17,7 +17,7 @@ export function Settings() {
   const { user } = useAuth();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<UserRole>("Read-Only Auditor");
-  const [expiresInHours, setExpiresInHours] = useState(72);
+  const [expiresInHours, setExpiresInHours] = useState(24);
   const [invites, setInvites] = useState<InviteToken[]>([]);
   const [createdInvite, setCreatedInvite] = useState<InviteToken | null>(null);
   const [message, setMessage] = useState("");
@@ -105,10 +105,10 @@ export function Settings() {
               <label>
                 <span>Expires</span>
                 <select value={expiresInHours} onChange={(event) => setExpiresInHours(Number(event.target.value))}>
+                  <option value={1}>1 hour</option>
+                  <option value={6}>6 hours</option>
+                  <option value={12}>12 hours</option>
                   <option value={24}>24 hours</option>
-                  <option value={72}>72 hours</option>
-                  <option value={168}>7 days</option>
-                  <option value={720}>30 days</option>
                 </select>
               </label>
               <button className="primary-button" disabled={submitting}>
