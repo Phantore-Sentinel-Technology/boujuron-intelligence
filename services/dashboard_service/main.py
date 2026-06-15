@@ -63,9 +63,26 @@ CASE_PRIORITIES = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
 ANALYST_FEEDBACK = {"TRUE_FRAUD", "FALSE_POSITIVE", "NEEDS_REVIEW"}
 CASE_DECISIONS = {"ALLOW", "VERIFY", "BLOCK", "FREEZE", "ESCALATE"}
 
+
+def get_cors_origins():
+    configured_origins = [
+        origin.strip()
+        for origin in settings.CORS_ORIGINS.split(",")
+        if origin.strip()
+    ]
+    fallback_origins = [
+        settings.FRONTEND_URL,
+        "https://boujuron.netlify.app",
+        "http://localhost:5173",
+        "http://localhost:4173",
+        "http://localhost:8002",
+    ]
+    return sorted({origin.rstrip("/") for origin in configured_origins + fallback_origins if origin})
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()],
+    allow_origins=get_cors_origins(),
+    allow_origin_regex=r"https://.*\.netlify\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
