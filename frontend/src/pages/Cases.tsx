@@ -55,7 +55,7 @@ export function Cases() {
         </div>
       </section>
 
-      <section className="table-section">
+      <section className="table-section case-table-section">
         <div className="section-header">
           <div>
             <p className="eyebrow">Case queue</p>

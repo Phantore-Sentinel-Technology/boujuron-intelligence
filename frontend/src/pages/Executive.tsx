@@ -27,21 +27,36 @@ export function Executive() {
   const [riskDistribution, setRiskDistribution] = useState<RiskDistributionPoint[]>([]);
   const [analysts, setAnalysts] = useState<AnalystPerformance[]>([]);
   const [heatMap, setHeatMap] = useState<FraudHeatMapPoint[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([
-      getAnalyticsOverview(),
-      getAnalyticsTrends(),
-      getRiskDistribution(),
-      getAnalystPerformance(),
-      getFraudHeatMap()
-    ]).then(([overviewData, trendsData, distributionData, analystData, heatData]) => {
-      setOverview(overviewData);
-      setTrends(trendsData);
-      setRiskDistribution(distributionData);
-      setAnalysts(analystData);
-      setHeatMap(heatData);
-    });
+    let mounted = true;
+
+    const loadExecutiveData = () => {
+      Promise.all([
+        getAnalyticsOverview(),
+        getAnalyticsTrends(),
+        getRiskDistribution(),
+        getAnalystPerformance(),
+        getFraudHeatMap()
+      ])
+        .then(([overviewData, trendsData, distributionData, analystData, heatData]) => {
+          if (!mounted) return;
+          setOverview(overviewData);
+          setTrends(trendsData);
+          setRiskDistribution(distributionData);
+          setAnalysts(analystData);
+          setHeatMap(heatData);
+        })
+        .finally(() => mounted && setLoading(false));
+    };
+
+    loadExecutiveData();
+    const timer = window.setInterval(loadExecutiveData, 8000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   return (
@@ -91,6 +106,7 @@ export function Executive() {
               <Area dataKey="value" stroke="#38bdf8" strokeWidth={2} fill="url(#executiveTrend)" />
             </AreaChart>
           </ResponsiveContainer>
+          {!loading && trends.length === 0 && <div className="chart-empty">No fraud trend data yet.</div>}
         </section>
 
         <section className="chart-panel">
@@ -108,6 +124,7 @@ export function Executive() {
               <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", borderRadius: 8 }} />
             </PieChart>
           </ResponsiveContainer>
+          {!loading && riskDistribution.every((item) => item.count === 0) && <div className="chart-empty">No risk mix data yet.</div>}
         </section>
       </div>
 
@@ -129,6 +146,7 @@ export function Executive() {
               <Bar dataKey="resolved_cases" fill="#22c55e" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
+          {!loading && analysts.length === 0 && <div className="chart-empty">No case throughput yet.</div>}
         </section>
 
         <section className="insight-panel heat-panel">

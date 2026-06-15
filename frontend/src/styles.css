@@ -316,6 +316,16 @@ button, a, input, select, textarea {
   padding: 18px;
 }
 
+.chart-empty {
+  margin-top: -236px;
+  min-height: 236px;
+  display: grid;
+  place-items: center;
+  color: #94a3b8;
+  text-align: center;
+  pointer-events: none;
+}
+
 .section-header {
   display: flex;
   justify-content: space-between;
@@ -1687,7 +1697,8 @@ dd {
 }
 
 :root[data-theme="light"] .executive-kpi-grid span,
-:root[data-theme="light"] .heat-row span {
+:root[data-theme="light"] .heat-row span,
+:root[data-theme="light"] .chart-empty {
   color: #64748b;
 }
 
@@ -1771,23 +1782,19 @@ dd {
 
   .nav-list {
     grid-column: 1 / -1;
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 8px;
-    overflow-x: auto;
-    padding: 2px 0 4px;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .nav-list::-webkit-scrollbar {
-    display: none;
+    overflow: visible;
+    padding: 2px 0 0;
   }
 
   .nav-link {
-    flex: 0 0 auto;
     min-height: 40px;
     padding: 9px 11px;
-    white-space: nowrap;
+    justify-content: center;
+    white-space: normal;
+    text-align: center;
   }
 
   .sidebar-status {
@@ -1896,9 +1903,13 @@ dd {
   }
 
   .notification-popover {
-    left: 0;
-    right: auto;
-    width: min(360px, calc(100vw - 32px));
+    position: fixed;
+    top: 138px;
+    left: 16px;
+    right: 16px;
+    width: auto;
+    max-height: min(430px, calc(100vh - 170px));
+    overflow-y: auto;
   }
 
   .stats-grid,
@@ -1972,7 +1983,95 @@ dd {
   }
 
   table {
-    min-width: 760px;
+    min-width: 0;
+  }
+
+  table,
+  thead,
+  tbody,
+  tr,
+  th,
+  td {
+    display: block;
+  }
+
+  thead {
+    display: none;
+  }
+
+  tbody {
+    display: grid;
+    gap: 12px;
+  }
+
+  tbody tr {
+    display: grid;
+    gap: 8px;
+    padding: 14px;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    background: #0f172a;
+  }
+
+  tbody tr:hover {
+    background: #0f172a;
+  }
+
+  th,
+  td {
+    border-bottom: 0;
+    padding: 0;
+  }
+
+  td {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    min-width: 0;
+    text-align: right;
+  }
+
+  td::before {
+    content: "";
+    flex: 0 0 auto;
+    color: #94a3b8;
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-align: left;
+  }
+
+  .fraud-table-section td:nth-child(1)::before { content: "User"; }
+  .fraud-table-section td:nth-child(2)::before { content: "Score"; }
+  .fraud-table-section td:nth-child(3)::before { content: "Risk"; }
+  .fraud-table-section td:nth-child(4)::before { content: "Confidence"; }
+  .fraud-table-section td:nth-child(5)::before { content: "Signals"; }
+  .fraud-table-section td:nth-child(6)::before { content: "Action"; }
+  .fraud-table-section td:nth-child(7)::before { content: "Reason"; }
+  .fraud-table-section td:nth-child(8)::before { content: "Time"; }
+
+  .case-table-section td:nth-child(1)::before { content: "Case"; }
+  .case-table-section td:nth-child(2)::before { content: "User"; }
+  .case-table-section td:nth-child(3)::before { content: "Risk"; }
+  .case-table-section td:nth-child(4)::before { content: "Status"; }
+  .case-table-section td:nth-child(5)::before { content: "Priority"; }
+  .case-table-section td:nth-child(6)::before { content: "Assigned"; }
+  .case-table-section td:nth-child(7)::before { content: "Feedback"; }
+  .case-table-section td:nth-child(8)::before { content: "Updated"; }
+
+  td:last-child {
+    display: none;
+  }
+
+  .reason-cell {
+    max-width: none;
+    overflow-wrap: anywhere;
+  }
+
+  .action-cell {
+    overflow-wrap: anywhere;
   }
 
   .drawer-backdrop {
@@ -2032,9 +2131,10 @@ dd {
   }
 
   .notification-popover {
-    left: auto;
-    right: -2px;
-    width: calc(100vw - 24px);
+    top: 124px;
+    left: 12px;
+    right: 12px;
+    width: auto;
   }
 
   .auth-page {
@@ -2075,13 +2175,12 @@ dd {
     grid-template-columns: 1fr;
   }
 
-  table {
-    min-width: 680px;
+  .nav-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  th,
-  td {
-    padding: 11px 8px;
+  .nav-link {
+    justify-content: flex-start;
   }
 
   .toast-success {

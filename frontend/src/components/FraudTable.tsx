@@ -26,7 +26,7 @@ export function FraudTable({ alerts, loading }: FraudTableProps) {
   }, [alerts, query, risk]);
 
   return (
-    <section className="table-section">
+    <section className="table-section fraud-table-section">
       <div className="section-header">
         <div>
           <p className="eyebrow">Alert queue</p>
@@ -99,7 +99,7 @@ function formatAction(action?: string | null) {
 
 function formatConfidence(confidence?: number | null) {
   if (confidence === null || confidence === undefined) return "N/A";
-  return `${Math.round(confidence * 100)}%`;
+  return `${Math.round(confidence > 1 ? confidence : confidence * 100)}%`;
 }
 
 function formatTime(timestamp: string) {
