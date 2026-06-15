@@ -63,6 +63,17 @@ class FraudAlertResponse(BaseModel):
     behavioral_match: bool | None = None
 
 
+class DemoFraudEventRequest(BaseModel):
+    user_id: str = "acct_501"
+    event_type: str = "large_transfer"
+    device_type: str = "rooted device"
+    ip: str = "45.90.12.10"
+    timestamp: str | None = None
+    amount: float = 2500000
+    location: str = "russia"
+    network: str = "TOR"
+
+
 class ScoreBreakdownItem(BaseModel):
     label: str
     points: int

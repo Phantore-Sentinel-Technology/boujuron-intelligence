@@ -32,6 +32,7 @@ from services.dashboard_service.schemas import (
     CaseSummaryResponse,
     CaseTimelineResponse,
     CaseUpdateRequest,
+    DemoFraudEventRequest,
     EventResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
@@ -49,6 +50,7 @@ from services.dashboard_service.schemas import (
     UserProfileEvent,
     UserProfileResponse,
 )
+from services.risk_engine_service.engine import analyze_event
 from pathlib import Path
 app = FastAPI(title="Boujuron Dashboard API")
 
@@ -273,6 +275,15 @@ def simple_pdf(title: str, lines: list[str]) -> bytes:
 def priority_from_risk(risk_level: str | None) -> str:
     level = (risk_level or "LOW").upper()
     return level if level in CASE_PRIORITIES else "LOW"
+
+
+def recommended_action_from_risk(risk_level: str | None) -> str:
+    return {
+        "LOW": "ALLOW",
+        "MEDIUM": "STEP_UP_VERIFICATION",
+        "HIGH": "BLOCK_AND_REVIEW",
+        "CRITICAL": "FREEZE_ACCOUNT_AND_ESCALATE",
+    }.get((risk_level or "LOW").upper(), "REVIEW")
 
 
 def materialize_cases_from_alerts(cursor):
@@ -658,6 +669,87 @@ async def push_fraud(event: dict):
     for client in clients:
         await client.send_json(event)
     return {"status": "sent"}
+
+
+@app.post("/demo/fraud-event", response_model=FraudAlertResponse)
+async def create_demo_fraud_event(
+    payload: DemoFraudEventRequest,
+    current_user: AuthUserResponse = Depends(get_current_user),
+):
+    event = payload.model_dump()
+    event["timestamp"] = event.get("timestamp") or datetime.utcnow().isoformat()
+    result = analyze_event(event)
+    reason = result["reason"]
+    risk_score = int(result["risk_score"])
+    risk_level = result["risk_level"]
+    recommended_action = recommended_action_from_risk(risk_level)
+    signals_triggered = 0 if reason == "Normal activity" else len([item for item in reason.split(",") if item.strip()])
+    behavioral_match = risk_score < 40
+    confidence = min(99, max(55, risk_score + 4))
+
+    conn, cursor = get_db()
+    prepare_analytics_tables(cursor)
+    cursor.execute("""
+        INSERT INTO events (transaction_id, user_id, amount, location, event_type, device_type, network, ip, timestamp)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, (
+        f"demo-{secrets.token_hex(4)}",
+        payload.user_id,
+        payload.amount,
+        payload.location,
+        payload.event_type,
+        payload.device_type,
+        payload.network,
+        payload.ip,
+        event["timestamp"],
+    ))
+    cursor.execute("""
+        INSERT INTO fraud_alerts (
+            user_id,
+            reason,
+            risk_score,
+            risk_level,
+            timestamp,
+            recommended_action,
+            confidence,
+            signals_triggered,
+            behavioral_match
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+    """, (
+        payload.user_id,
+        reason,
+        risk_score,
+        risk_level,
+        event["timestamp"],
+        recommended_action,
+        confidence,
+        signals_triggered,
+        behavioral_match,
+    ))
+    alert_id = cursor.fetchone()[0]
+    materialize_cases_from_alerts(cursor)
+    conn.commit()
+    conn.close()
+
+    alert = FraudAlertResponse(
+        user_id=payload.user_id,
+        reason=reason,
+        timestamp=event["timestamp"],
+        risk_score=str(risk_score),
+        risk_level=risk_level,
+        recommended_action=recommended_action,
+        confidence=float(confidence),
+        signals_triggered=signals_triggered,
+        behavioral_match=behavioral_match,
+    )
+    socket_event = alert.model_dump()
+    socket_event["id"] = alert_id
+    socket_event["created_by"] = current_user.name
+    for client in clients:
+        await client.send_json(socket_event)
+    return alert
 
 
 @app.get("/events", response_model=list[EventResponse])
