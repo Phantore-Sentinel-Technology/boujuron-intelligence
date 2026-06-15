@@ -28,25 +28,32 @@ export function Executive() {
   const [analysts, setAnalysts] = useState<AnalystPerformance[]>([]);
   const [heatMap, setHeatMap] = useState<FraudHeatMapPoint[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     let mounted = true;
 
     const loadExecutiveData = () => {
-      Promise.all([
+      Promise.allSettled([
         getAnalyticsOverview(),
         getAnalyticsTrends(),
         getRiskDistribution(),
         getAnalystPerformance(),
         getFraudHeatMap()
       ])
-        .then(([overviewData, trendsData, distributionData, analystData, heatData]) => {
+        .then((results) => {
           if (!mounted) return;
-          setOverview(overviewData);
-          setTrends(trendsData);
-          setRiskDistribution(distributionData);
-          setAnalysts(analystData);
-          setHeatMap(heatData);
+
+          const [overviewResult, trendsResult, distributionResult, analystResult, heatResult] = results;
+          if (overviewResult.status === "fulfilled") setOverview(overviewResult.value);
+          if (trendsResult.status === "fulfilled") setTrends(trendsResult.value);
+          if (distributionResult.status === "fulfilled") setRiskDistribution(distributionResult.value);
+          if (analystResult.status === "fulfilled") setAnalysts(analystResult.value);
+          if (heatResult.status === "fulfilled") setHeatMap(heatResult.value);
+
+          setLoadError(results.some((result) => result.status === "rejected")
+            ? "Some executive metrics could not load. Refresh or sign in again if this continues."
+            : "");
         })
         .finally(() => mounted && setLoading(false));
     };
@@ -73,6 +80,7 @@ export function Executive() {
           <button onClick={() => downloadExport("/reports/monthly.pdf", "monthly-fraud-report.pdf")}><FileText size={16} /> PDF Report</button>
         </div>
       </section>
+      {loadError && <div className="form-error">{loadError}</div>}
 
       <section className="executive-kpi-grid">
         <Kpi label="Total Events Processed" value={overview.total_events.toLocaleString()} />
