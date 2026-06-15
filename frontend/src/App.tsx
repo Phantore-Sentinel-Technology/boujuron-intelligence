@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { Dashboard } from "./pages/Dashboard";
 import { Activity } from "./pages/Activity";
+import { History } from "./pages/History";
 import { Analytics } from "./pages/Analytics";
 import { Executive } from "./pages/Executive";
 import { Alerts } from "./pages/Alerts";
@@ -46,6 +47,7 @@ function AuthenticatedApp() {
       <Routes>
         <Route path="/" element={<Dashboard {...fraud} />} />
         <Route path="/activity" element={<Activity />} />
+        <Route path="/history" element={<History />} />
         <Route path="/executive" element={<Executive />} />
         <Route path="/analytics" element={<Analytics alerts={fraud.alerts} stats={fraud.stats} />} />
         <Route path="/alerts" element={<Alerts alerts={fraud.topAlerts} loading={fraud.loading} />} />

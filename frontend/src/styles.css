@@ -925,12 +925,12 @@ dd {
   font-size: 12px;
 }
 
-.anomaly-list, .notification-list, .investigation-feed {
+.anomaly-list, .notification-list, .investigation-feed, .history-list {
   display: grid;
   gap: 10px;
 }
 
-.anomaly-item, .notification-item, .feed-event {
+.anomaly-item, .notification-item, .notification-item-row, .feed-event {
   border: 1px solid #334155;
   border-radius: 8px;
   background: #0f172a;
@@ -938,25 +938,26 @@ dd {
 }
 
 .anomaly-item strong, .anomaly-item span,
-.notification-item strong, .notification-item span {
+.notification-item strong, .notification-item span,
+.notification-item-content strong, .notification-item-content span {
   display: block;
 }
 
-.anomaly-item span, .notification-item span {
+.anomaly-item span, .notification-item span, .notification-item-content span {
   color: #94a3b8;
   margin-top: 5px;
   line-height: 1.35;
 }
 
-.anomaly-item.high, .notification-item.high {
+.anomaly-item.high, .notification-item.high, .notification-item-row.high {
   border-color: rgba(249, 115, 22, 0.44);
 }
 
-.anomaly-item.critical, .notification-item.critical {
+.anomaly-item.critical, .notification-item.critical, .notification-item-row.critical {
   border-color: rgba(220, 38, 38, 0.46);
 }
 
-.anomaly-item.medium, .notification-item.medium {
+.anomaly-item.medium, .notification-item.medium, .notification-item-row.medium {
   border-color: rgba(245, 158, 11, 0.42);
 }
 
@@ -964,6 +965,37 @@ dd {
   color: inherit;
   text-decoration: none;
   min-width: 0;
+}
+
+.notification-item-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  touch-action: pan-y;
+}
+
+.notification-item-content {
+  color: inherit;
+  text-decoration: none;
+  min-width: 0;
+}
+
+.notification-dismiss {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #111827;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.notification-dismiss:hover {
+  color: #f8fafc;
+  border-color: #64748b;
 }
 
 .notification-list.full .notification-item time {
@@ -1065,6 +1097,62 @@ dd {
   display: grid;
   gap: 7px;
   justify-items: end;
+}
+
+.history-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.history-count {
+  min-width: 132px;
+  justify-content: center;
+}
+
+.history-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  padding: 14px;
+}
+
+.history-icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #1e293b;
+  color: #38bdf8;
+}
+
+.history-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.history-item p {
+  color: #cbd5e1;
+  margin: 7px 0;
+}
+
+.history-item span,
+.history-item time {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.history-item a {
+  color: #38bdf8;
+  font-weight: 800;
+  text-decoration: none;
 }
 
 .executive-hero {
@@ -1654,9 +1742,13 @@ dd {
 
 :root[data-theme="light"] .anomaly-item,
 :root[data-theme="light"] .notification-item,
+:root[data-theme="light"] .notification-item-row,
 :root[data-theme="light"] .feed-event,
 :root[data-theme="light"] .risk-point > div,
-:root[data-theme="light"] .feed-event-icon {
+:root[data-theme="light"] .feed-event-icon,
+:root[data-theme="light"] .history-item,
+:root[data-theme="light"] .history-icon,
+:root[data-theme="light"] .notification-dismiss {
   background: #f8fafc;
   border-color: #cbd5e1;
   color: #0f172a;
@@ -1664,12 +1756,19 @@ dd {
 
 :root[data-theme="light"] .anomaly-item span,
 :root[data-theme="light"] .notification-item span,
+:root[data-theme="light"] .notification-item-content span,
 :root[data-theme="light"] .notification-list.full .notification-item time,
 :root[data-theme="light"] .risk-point time,
 :root[data-theme="light"] .feed-event span,
 :root[data-theme="light"] .feed-event small,
-:root[data-theme="light"] .feed-event time {
+:root[data-theme="light"] .feed-event time,
+:root[data-theme="light"] .history-item span,
+:root[data-theme="light"] .history-item time {
   color: #64748b;
+}
+
+:root[data-theme="light"] .history-item p {
+  color: #334155;
 }
 
 :root[data-theme="light"] .live-indicator {
@@ -2107,12 +2206,15 @@ dd {
 
   .decision-grid,
   .timeline-item,
-  .feed-event {
+  .feed-event,
+  .history-item {
     grid-template-columns: 1fr;
   }
 
-  .feed-event-side {
+  .feed-event-side,
+  .history-item time {
     justify-items: start;
+    text-align: left;
   }
 
   .risk-timeline {

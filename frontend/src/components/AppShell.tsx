@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Activity, BarChart3, Bell, BriefcaseBusiness, Gauge, LayoutDashboard, LogOut, Moon, Settings, ShieldCheck, Sun, Users } from "lucide-react";
+import { Activity, BarChart3, Bell, BriefcaseBusiness, Gauge, History, LayoutDashboard, LogOut, Moon, Settings, ShieldCheck, Sun, Users, X } from "lucide-react";
 import type { PropsWithChildren } from "react";
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -10,6 +10,7 @@ import { getIntelligenceActivity } from "../services/api";
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/activity", label: "Live Feed", icon: Activity },
+  { to: "/history", label: "History", icon: History },
   { to: "/executive", label: "Executive", icon: BarChart3 },
   { to: "/analytics", label: "Analytics", icon: Activity },
   { to: "/alerts", label: "Alerts", icon: Bell },
@@ -17,6 +18,8 @@ const links = [
   { to: "/users", label: "Users", icon: Users },
   { to: "/settings", label: "Settings", icon: Settings }
 ];
+
+const dismissedNotificationsKey = "boujuron.dismissed.notifications";
 
 interface AppShellProps extends PropsWithChildren {
   connection: "live" | "polling" | "offline";
@@ -27,13 +30,20 @@ export function AppShell({ children, connection }: AppShellProps) {
   const { theme, toggleTheme } = useTheme();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [dismissed, setDismissed] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(dismissedNotificationsKey) || "[]") as string[];
+    } catch {
+      return [];
+    }
+  });
   const ThemeIcon = theme === "dark" ? Moon : Sun;
 
   useEffect(() => {
     let mounted = true;
     const load = () => {
       getIntelligenceActivity(12)
-        .then((data) => mounted && setNotifications(data.notifications))
+        .then((data) => mounted && setNotifications(data.notifications.filter((item) => !dismissed.includes(item.id))))
         .catch(() => mounted && setNotifications([]));
     };
     load();
@@ -42,7 +52,16 @@ export function AppShell({ children, connection }: AppShellProps) {
       mounted = false;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [dismissed]);
+
+  function dismissNotification(id: string) {
+    setDismissed((current) => {
+      const next = Array.from(new Set([...current, id])).slice(-80);
+      localStorage.setItem(dismissedNotificationsKey, JSON.stringify(next));
+      return next;
+    });
+    setNotifications((current) => current.filter((item) => item.id !== id));
+  }
 
   return (
     <div className="app-shell">
@@ -116,10 +135,7 @@ export function AppShell({ children, connection }: AppShellProps) {
                   </div>
                   <div className="notification-list">
                     {notifications.map((item) => (
-                      <NavLink key={item.id} to={item.case_id ? `/cases/${item.case_id}` : "/activity"} className={`notification-item ${item.severity.toLowerCase()}`} onClick={() => setNotificationsOpen(false)}>
-                        <strong>{item.title}</strong>
-                        <span>{item.message}</span>
-                      </NavLink>
+                      <DismissibleNotification key={item.id} item={item} onDismiss={dismissNotification} onOpen={() => setNotificationsOpen(false)} />
                     ))}
                     {notifications.length === 0 && <div className="empty-state slim">No live notifications yet.</div>}
                   </div>
@@ -134,6 +150,30 @@ export function AppShell({ children, connection }: AppShellProps) {
         </header>
         {children}
       </main>
+    </div>
+  );
+}
+
+function DismissibleNotification({ item, onDismiss, onOpen }: { item: NotificationItem; onDismiss: (id: string) => void; onOpen: () => void }) {
+  const [startX, setStartX] = useState<number | null>(null);
+  const to = item.case_id ? `/cases/${item.case_id}` : "/history";
+
+  return (
+    <div
+      className={`notification-item-row ${item.severity.toLowerCase()}`}
+      onPointerDown={(event) => setStartX(event.clientX)}
+      onPointerUp={(event) => {
+        if (startX !== null && Math.abs(event.clientX - startX) > 70) onDismiss(item.id);
+        setStartX(null);
+      }}
+    >
+      <NavLink to={to} className="notification-item-content" onClick={onOpen}>
+        <strong>{item.title}</strong>
+        <span>{item.message}</span>
+      </NavLink>
+      <button className="notification-dismiss" onClick={() => onDismiss(item.id)} aria-label="Dismiss notification">
+        <X size={15} />
+      </button>
     </div>
   );
 }
