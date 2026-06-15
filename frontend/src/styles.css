@@ -1902,13 +1902,26 @@ dd {
     justify-content: space-between;
   }
 
+  .topbar-actions .notification-wrap {
+    position: fixed;
+    top: max(14px, env(safe-area-inset-top));
+    right: 14px;
+    z-index: 90;
+  }
+
+  .notification-button {
+    width: 44px;
+    height: 44px;
+    box-shadow: 0 14px 34px rgba(2, 6, 23, 0.32);
+  }
+
   .notification-popover {
     position: fixed;
-    top: 138px;
-    left: 16px;
-    right: 16px;
-    width: auto;
-    max-height: min(430px, calc(100vh - 170px));
+    top: max(68px, calc(env(safe-area-inset-top) + 68px));
+    left: auto;
+    right: 14px;
+    width: min(360px, calc(100vw - 28px));
+    max-height: min(430px, calc(100vh - 96px));
     overflow-y: auto;
   }
 
@@ -2130,11 +2143,20 @@ dd {
     display: none;
   }
 
-  .notification-popover {
-    top: 124px;
-    left: 12px;
+  .topbar-actions {
+    min-height: 0;
+    justify-content: flex-end;
+  }
+
+  .topbar-actions .notification-wrap {
     right: 12px;
-    width: auto;
+  }
+
+  .notification-popover {
+    top: max(64px, calc(env(safe-area-inset-top) + 64px));
+    left: auto;
+    right: 12px;
+    width: calc(100vw - 24px);
   }
 
   .auth-page {
