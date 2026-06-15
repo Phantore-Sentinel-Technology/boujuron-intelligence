@@ -28,34 +28,47 @@ export function Executive() {
   const [analysts, setAnalysts] = useState<AnalystPerformance[]>([]);
   const [heatMap, setHeatMap] = useState<FraudHeatMapPoint[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     let mounted = true;
 
-    const loadExecutiveData = () => {
-      Promise.allSettled([
-        getAnalyticsOverview(),
-        getAnalyticsTrends(),
-        getRiskDistribution(),
-        getAnalystPerformance(),
-        getFraudHeatMap()
-      ])
-        .then((results) => {
-          if (!mounted) return;
+    const loadExecutiveData = async () => {
+      try {
+        const overviewData = await getAnalyticsOverview();
+        if (mounted) setOverview(overviewData);
+      } catch {
+        // Keep the last successful values visible during brief free-tier API delays.
+      }
 
-          const [overviewResult, trendsResult, distributionResult, analystResult, heatResult] = results;
-          if (overviewResult.status === "fulfilled") setOverview(overviewResult.value);
-          if (trendsResult.status === "fulfilled") setTrends(trendsResult.value);
-          if (distributionResult.status === "fulfilled") setRiskDistribution(distributionResult.value);
-          if (analystResult.status === "fulfilled") setAnalysts(analystResult.value);
-          if (heatResult.status === "fulfilled") setHeatMap(heatResult.value);
+      try {
+        const trendsData = await getAnalyticsTrends();
+        if (mounted) setTrends(trendsData);
+      } catch {
+        // Optional chart data retries on the next refresh cycle.
+      }
 
-          setLoadError(results.some((result) => result.status === "rejected")
-            ? "Some executive metrics could not load. Refresh or sign in again if this continues."
-            : "");
-        })
-        .finally(() => mounted && setLoading(false));
+      try {
+        const distributionData = await getRiskDistribution();
+        if (mounted) setRiskDistribution(distributionData);
+      } catch {
+        // Optional chart data retries on the next refresh cycle.
+      }
+
+      try {
+        const analystData = await getAnalystPerformance();
+        if (mounted) setAnalysts(analystData);
+      } catch {
+        // Optional chart data retries on the next refresh cycle.
+      }
+
+      try {
+        const heatData = await getFraudHeatMap();
+        if (mounted) setHeatMap(heatData);
+      } catch {
+        // Optional chart data retries on the next refresh cycle.
+      }
+
+      if (mounted) setLoading(false);
     };
 
     loadExecutiveData();
@@ -80,7 +93,6 @@ export function Executive() {
           <button onClick={() => downloadExport("/reports/monthly.pdf", "monthly-fraud-report.pdf")}><FileText size={16} /> PDF Report</button>
         </div>
       </section>
-      {loadError && <div className="form-error">{loadError}</div>}
 
       <section className="executive-kpi-grid">
         <Kpi label="Total Events Processed" value={overview.total_events.toLocaleString()} />
