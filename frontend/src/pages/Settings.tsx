@@ -1,20 +1,28 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Activity, Building2, Code2, Copy, KeyRound, Plus, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
-import type { BehaviorEvaluation, BehaviorSettings, ClientApiKey, DecisionRule, InviteToken, Organization, RuleCondition, RuleField, UserRole } from "../types";
+import { Activity, BellRing, Building2, Code2, Copy, KeyRound, Plus, RefreshCw, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
+import type { AlertDestination, ApiUsage, BehaviorEvaluation, BehaviorSettings, ClientApiKey, ConsortiumSettings, DecisionRule, Invoice, InviteToken, Organization, RuleCondition, RuleField, UserRole } from "../types";
 import {
   createClientApiKey,
   createDecisionRule,
+  createAlertDestination,
   createInvite,
   createOrganization,
   deleteDecisionRule,
+  deleteAlertDestination,
   getBehaviorEvaluation,
   getBehaviorSettings,
   getClientApiKeys,
   getCurrentOrganization,
   getDecisionRules,
+  getAlertDestinations,
+  getConsortiumSettings,
+  getInvoices,
   getInvites,
+  getPortalUsage,
+  rotateClientApiKey,
   revokeClientApiKey,
-  updateBehaviorSettings
+  updateBehaviorSettings,
+  updateConsortiumSettings
 } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -60,19 +68,27 @@ export function Settings() {
   const [ruleConditions, setRuleConditions] = useState<RuleCondition[]>([{ field: "amount", operator: "GT", value: 1000000 }]);
   const [ruleMessage, setRuleMessage] = useState("");
   const [savingRule, setSavingRule] = useState(false);
+  const [usage, setUsage] = useState<ApiUsage | null>(null);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [destinations, setDestinations] = useState<AlertDestination[]>([]);
+  const [destinationName, setDestinationName] = useState("");
+  const [destinationChannel, setDestinationChannel] = useState<AlertDestination["channel"]>("WEBHOOK");
+  const [destinationTarget, setDestinationTarget] = useState("");
+  const [consortium, setConsortium] = useState<ConsortiumSettings | null>(null);
   const isAdmin = user?.role === "Admin";
 
   useEffect(() => {
     setLoadingInvites(true);
     const adminRequests = isAdmin ? Promise.all([getInvites(), getClientApiKeys()]) : Promise.resolve([[], []] as [InviteToken[], ClientApiKey[]]);
-    Promise.all([adminRequests, getBehaviorSettings(), getBehaviorEvaluation(), getCurrentOrganization(), getDecisionRules()])
-      .then(([[inviteData, apiKeyData], settingsData, evaluationData, organizationData, rulesData]) => {
+    Promise.all([adminRequests, getBehaviorSettings(), getBehaviorEvaluation(), getCurrentOrganization(), getDecisionRules(), getPortalUsage(), getInvoices(), getAlertDestinations(), getConsortiumSettings()])
+      .then(([[inviteData, apiKeyData], settingsData, evaluationData, organizationData, rulesData, usageData, invoiceData, destinationData, consortiumData]) => {
         setInvites(inviteData);
         setApiKeys(apiKeyData);
         setBehaviorSettings(settingsData);
         setEvaluation(evaluationData);
         setOrganization(organizationData);
         setRules(rulesData);
+        setUsage(usageData); setInvoices(invoiceData); setDestinations(destinationData); setConsortium(consortiumData);
       })
       .catch(() => setMessage("Could not load all platform settings."))
       .finally(() => setLoadingInvites(false));
@@ -126,6 +142,31 @@ export function Settings() {
     await revokeClientApiKey(keyId);
     setApiKeys((current) => current.map((item) => item.id === keyId ? { ...item, active: false } : item));
     setApiKeyMessage("API key revoked.");
+  }
+
+  async function rotateApiKey(keyId: number) {
+    const rotated = await rotateClientApiKey(keyId);
+    setApiKeys((current) => [rotated, ...current.map((item) => item.id === keyId ? { ...item, active: false } : item)]);
+    setCreatedApiKey(rotated);
+    setApiKeyMessage("API key rotated. Copy the new key now.");
+  }
+
+  async function onCreateDestination(event: FormEvent) {
+    event.preventDefault();
+    const created = await createAlertDestination({ name: destinationName, channel: destinationChannel, target: destinationTarget, minimum_risk: "HIGH", enabled: true });
+    setDestinations((current) => [...current, created]);
+    setDestinationName(""); setDestinationTarget("");
+  }
+
+  async function removeDestination(id: number) {
+    await deleteAlertDestination(id);
+    setDestinations((current) => current.filter((item) => item.id !== id));
+  }
+
+  async function toggleConsortium() {
+    if (!consortium) return;
+    const updated = await updateConsortiumSettings({ ...consortium, enabled: !consortium.enabled });
+    setConsortium(updated);
   }
 
   function updateBehaviorField<K extends keyof BehaviorSettings>(field: K, value: BehaviorSettings[K]) {
@@ -420,16 +461,51 @@ export function Settings() {
                     <span>{apiKey.key_prefix}... / last used {apiKey.last_used_at ? formatTime(apiKey.last_used_at) : "Never"}</span>
                   </div>
                   <span className={`invite-status ${apiKey.active ? "active" : "used"}`}>{apiKey.active ? "Active" : "Revoked"}</span>
-                  <button className="small-button" disabled={!apiKey.active} onClick={() => revokeApiKey(apiKey.id)}>
-                    <Trash2 size={15} />
-                    Revoke
-                  </button>
+                  <div className="inline-actions">
+                    <span>{apiKey.request_count} requests</span>
+                    <button className="icon-button" title="Rotate key" disabled={!apiKey.active} onClick={() => rotateApiKey(apiKey.id)}><RefreshCw size={15} /></button>
+                    <button className="icon-button" title="Revoke key" disabled={!apiKey.active} onClick={() => revokeApiKey(apiKey.id)}><Trash2 size={15} /></button>
+                  </div>
                 </div>
               ))}
               {apiKeys.length === 0 && <div className="empty-state slim">No client API keys yet.</div>}
             </div>
           </>
         )}
+      </section>
+
+      <section className="insight-panel access-panel">
+        <div className="section-header"><div><p className="eyebrow">Customer portal</p><h2>Usage & Billing</h2></div><Activity size={22} /></div>
+        {usage && <div className="evaluation-grid">
+          <EvaluationMetric label="Total requests" value={usage.total_requests} />
+          <EvaluationMetric label="This month" value={usage.requests_this_month} />
+          <EvaluationMetric label="Blocked" value={usage.blocked} />
+          <EvaluationMetric label="Challenged" value={usage.challenged} />
+          <EvaluationMetric label="Allowed" value={usage.allowed} />
+        </div>}
+        <div className="invoice-list">
+          {invoices.map((invoice) => <div className="invoice-row" key={invoice.id}><strong>{invoice.invoice_number}</strong><span>{invoice.period}</span><span>{invoice.currency} {invoice.amount.toFixed(2)}</span><span>{invoice.status}</span></div>)}
+        </div>
+      </section>
+
+      <section className="insight-panel access-panel">
+        <div className="section-header"><div><p className="eyebrow">Real-time operations</p><h2>Alert Destinations</h2></div><BellRing size={22} /></div>
+        {isAdmin && <form className="destination-form" onSubmit={onCreateDestination}>
+          <input value={destinationName} onChange={(event) => setDestinationName(event.target.value)} placeholder="Fraud operations" required />
+          <select value={destinationChannel} onChange={(event) => setDestinationChannel(event.target.value as AlertDestination["channel"])}><option>WEBHOOK</option><option>SLACK</option><option>TEAMS</option><option>EMAIL</option></select>
+          <input value={destinationTarget} onChange={(event) => setDestinationTarget(event.target.value)} placeholder="Webhook URL or email" required />
+          <button className="primary-button">Add destination</button>
+        </form>}
+        <div className="invite-list">
+          {destinations.map((item) => <div className="invite-row" key={item.id}><div><strong>{item.name}</strong><span>{item.channel} · HIGH+ · {item.last_status || "Not sent yet"}</span></div><span className="invite-status active">{item.enabled ? "Active" : "Paused"}</span>{isAdmin && <button className="icon-button" title="Delete destination" onClick={() => removeDestination(item.id)}><Trash2 size={15} /></button>}</div>)}
+          {!destinations.length && <div className="empty-state slim">No outbound alert destinations configured.</div>}
+        </div>
+      </section>
+
+      <section className="insight-panel access-panel">
+        <div className="section-header"><div><p className="eyebrow">Privacy-preserving intelligence</p><h2>Fraud Consortium</h2></div><ShieldCheck size={22} /></div>
+        <p className="settings-copy">Shares salted hashes and aggregate fraud counts only. Raw customer identifiers never leave the tenant boundary.</p>
+        {consortium && <div className="consortium-control"><div><strong>{consortium.enabled ? "Consortium enabled" : "Consortium disabled"}</strong><span>Device and IP reputation across opted-in organizations</span></div>{isAdmin && <button className="primary-button" onClick={toggleConsortium}>{consortium.enabled ? "Disable" : "Enable"}</button>}</div>}
       </section>
 
       <section className="insight-panel access-panel">

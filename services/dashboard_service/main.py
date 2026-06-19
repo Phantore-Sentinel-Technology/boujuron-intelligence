@@ -7,7 +7,9 @@ import io
 import json
 import os
 import secrets
+import smtplib
 import time
+import urllib.request
 from collections import Counter
 from datetime import datetime, timedelta
 from statistics import mean
@@ -27,6 +29,9 @@ from services.dashboard_service.schemas import (
     AuthUserResponse,
     ApiKeyCreateRequest,
     ApiKeyResponse,
+    ApiKeyUsageResponse,
+    AlertDestinationRequest,
+    AlertDestinationResponse,
     BehaviorEvaluationResponse,
     BehaviorSettingsResponse,
     BehaviorSettingsUpdate,
@@ -52,11 +57,17 @@ from services.dashboard_service.schemas import (
     FraudAlertResponse,
     BehaviorAnomaly,
     FraudHeatMapPointResponse,
+    EvidenceEdge,
+    EvidenceGraphResponse,
+    EvidenceNode,
+    InvoiceResponse,
     IntelligenceActivityResponse,
     InvestigationFeedItemResponse,
     NotificationResponse,
     OrganizationCreateRequest,
     OrganizationResponse,
+    ConsortiumSettingsResponse,
+    ConsortiumSettingsUpdate,
     RiskTimelinePoint,
     RiskDistributionResponse,
     RiskScoreRequest,
@@ -276,7 +287,21 @@ def ensure_auth_tables(cursor):
         )
     """)
     cursor.execute("ALTER TABLE client_api_keys ADD COLUMN IF NOT EXISTS organization_id INTEGER")
+    cursor.execute("ALTER TABLE client_api_keys ADD COLUMN IF NOT EXISTS request_count BIGINT DEFAULT 0")
+    cursor.execute("ALTER TABLE client_api_keys ADD COLUMN IF NOT EXISTS rotated_from INTEGER")
     cursor.execute("UPDATE client_api_keys SET organization_id = %s WHERE organization_id IS NULL", (organization_id,))
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS invoices (
+            id SERIAL PRIMARY KEY,
+            organization_id INTEGER NOT NULL,
+            invoice_number TEXT UNIQUE NOT NULL,
+            period TEXT NOT NULL,
+            amount NUMERIC DEFAULT 0,
+            currency TEXT DEFAULT 'USD',
+            status TEXT DEFAULT 'DRAFT',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
 
 def ensure_event_table(cursor):
@@ -453,6 +478,53 @@ def ensure_decision_rule_tables(cursor):
             status TEXT DEFAULT 'DECIDED',
             reason TEXT DEFAULT '',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS feedback_learning_events (
+            id SERIAL PRIMARY KEY,
+            organization_id INTEGER NOT NULL,
+            risk_decision_id INTEGER NOT NULL,
+            feedback TEXT NOT NULL,
+            learned_features JSONB DEFAULT '[]'::jsonb,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (risk_decision_id, feedback)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS alert_destinations (
+            id SERIAL PRIMARY KEY,
+            organization_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            target TEXT NOT NULL,
+            minimum_risk TEXT DEFAULT 'HIGH',
+            enabled BOOLEAN DEFAULT TRUE,
+            last_status TEXT,
+            last_sent_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS consortium_settings (
+            organization_id INTEGER PRIMARY KEY,
+            enabled BOOLEAN DEFAULT FALSE,
+            share_devices BOOLEAN DEFAULT TRUE,
+            share_ips BOOLEAN DEFAULT TRUE,
+            share_emails BOOLEAN DEFAULT FALSE,
+            share_phones BOOLEAN DEFAULT FALSE,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS consortium_reputation (
+            entity_type TEXT NOT NULL,
+            entity_hash TEXT NOT NULL,
+            organization_id INTEGER NOT NULL,
+            confirmed_fraud_count INTEGER DEFAULT 0,
+            false_positive_count INTEGER DEFAULT 0,
+            last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (entity_type, entity_hash, organization_id)
         )
     """)
 
@@ -732,7 +804,11 @@ def authenticate_risk_client(
         if not row:
             conn.close()
             raise HTTPException(status_code=401, detail="Invalid API key")
-        cursor.execute("UPDATE client_api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE id = %s", (row[0],))
+        cursor.execute("""
+            UPDATE client_api_keys
+            SET last_used_at = CURRENT_TIMESTAMP, request_count = request_count + 1
+            WHERE id = %s
+        """, (row[0],))
         conn.commit()
         conn.close()
         return {"type": "api_key", "id": row[0], "name": row[1], "prefix": row[2], "organization_id": row[3]}
@@ -762,13 +838,14 @@ async def broadcast_alert(alert: dict, organization_id: int):
 
 
 def api_key_response(row, api_key: str | None = None) -> ApiKeyResponse:
-    key_id, name, key_prefix, active, last_used_at, created_at = row
+    key_id, name, key_prefix, active, request_count, last_used_at, created_at = row
     return ApiKeyResponse(
         id=key_id,
         name=name,
         key_prefix=key_prefix,
         api_key=api_key,
         active=active,
+        request_count=int(request_count or 0),
         last_used_at=str(last_used_at) if last_used_at else None,
         created_at=str(created_at),
     )
@@ -1546,7 +1623,7 @@ def create_api_key(payload: ApiKeyCreateRequest, current_user: AuthUserResponse 
     cursor.execute("""
         INSERT INTO client_api_keys (name, key_prefix, key_hash, created_by, organization_id)
         VALUES (%s, %s, %s, %s, %s)
-        RETURNING id, name, key_prefix, active, last_used_at, created_at
+        RETURNING id, name, key_prefix, active, request_count, last_used_at, created_at
     """, (
         payload.name.strip(),
         prefix,
@@ -1566,7 +1643,7 @@ def list_api_keys(current_user: AuthUserResponse = Depends(get_current_user)):
     conn, cursor = get_db()
     ensure_auth_tables(cursor)
     cursor.execute("""
-        SELECT id, name, key_prefix, active, last_used_at, created_at
+        SELECT id, name, key_prefix, active, request_count, last_used_at, created_at
         FROM client_api_keys
         WHERE organization_id = %s
         ORDER BY created_at DESC
@@ -1592,6 +1669,69 @@ def revoke_api_key(key_id: int, current_user: AuthUserResponse = Depends(get_cur
     if not revoked:
         raise HTTPException(status_code=404, detail="API key not found")
     return {"message": "API key revoked"}
+
+
+@app.post("/api-keys/{key_id}/rotate", response_model=ApiKeyResponse)
+def rotate_api_key(key_id: int, current_user: AuthUserResponse = Depends(get_current_user)):
+    require_admin(current_user)
+    conn, cursor = get_db()
+    ensure_auth_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    cursor.execute("SELECT name FROM client_api_keys WHERE id = %s AND organization_id = %s AND active = TRUE", (key_id, organization_id))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Active API key not found")
+    raw_key = f"bj_live_{secrets.token_urlsafe(32)}"
+    cursor.execute("UPDATE client_api_keys SET active = FALSE WHERE id = %s", (key_id,))
+    cursor.execute("""
+        INSERT INTO client_api_keys (name, key_prefix, key_hash, created_by, organization_id, rotated_from)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id, name, key_prefix, active, request_count, last_used_at, created_at
+    """, (row[0], raw_key[:16], hash_api_key(raw_key), current_user.id, organization_id, key_id))
+    created = cursor.fetchone()
+    conn.commit()
+    conn.close()
+    return api_key_response(created, raw_key)
+
+
+@app.get("/portal/usage", response_model=ApiKeyUsageResponse)
+def portal_usage(current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    ensure_decision_rule_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    cursor.execute("""
+        SELECT COUNT(*),
+               COUNT(*) FILTER (WHERE created_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP)),
+               COUNT(*) FILTER (WHERE final_action = 'BLOCK'),
+               COUNT(*) FILTER (WHERE final_action = 'CHALLENGE'),
+               COUNT(*) FILTER (WHERE final_action = 'ALLOW')
+        FROM action_decisions WHERE organization_id = %s
+    """, (organization_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return ApiKeyUsageResponse(total_requests=row[0], requests_this_month=row[1], blocked=row[2], challenged=row[3], allowed=row[4])
+
+
+@app.get("/portal/invoices", response_model=list[InvoiceResponse])
+def portal_invoices(current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    ensure_auth_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    period = datetime.utcnow().strftime("%Y-%m")
+    cursor.execute("""
+        INSERT INTO invoices (organization_id, invoice_number, period, amount, currency, status)
+        VALUES (%s, %s, %s, 0, 'USD', 'DRAFT')
+        ON CONFLICT (invoice_number) DO NOTHING
+    """, (organization_id, f"INV-{organization_id}-{period}", period))
+    cursor.execute("""
+        SELECT id, invoice_number, period, amount, currency, status, created_at
+        FROM invoices WHERE organization_id = %s ORDER BY period DESC
+    """, (organization_id,))
+    rows = cursor.fetchall()
+    conn.commit()
+    conn.close()
+    return [InvoiceResponse(id=r[0], invoice_number=r[1], period=r[2], amount=float(r[3]), currency=r[4], status=r[5], created_at=str(r[6])) for r in rows]
 
 
 def behavior_settings_response(cursor, organization_id: int) -> BehaviorSettingsResponse:
@@ -1722,6 +1862,78 @@ def evaluate_decision_rules(cursor, organization_id: int, event: dict, result: d
     }
 
 
+def reputation_hash(entity_type: str, value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    return hmac.new(AUTH_SECRET.encode(), f"{entity_type}:{normalized}".encode(), hashlib.sha256).hexdigest()
+
+
+def consortium_signal(cursor, organization_id: int, event: dict, device_data: dict) -> dict | None:
+    ensure_decision_rule_tables(cursor)
+    cursor.execute("SELECT enabled FROM consortium_settings WHERE organization_id = %s", (organization_id,))
+    settings_row = cursor.fetchone()
+    if not settings_row or not settings_row[0]:
+        return None
+    entities = [("DEVICE", device_data["fingerprint"]), ("IP", event.get("ip"))]
+    total = 0
+    organizations = set()
+    for entity_type, value in entities:
+        if not value:
+            continue
+        cursor.execute("""
+            SELECT organization_id, confirmed_fraud_count, false_positive_count
+            FROM consortium_reputation
+            WHERE entity_type = %s AND entity_hash = %s AND organization_id <> %s
+        """, (entity_type, reputation_hash(entity_type, value), organization_id))
+        for other_org, fraud_count, false_count in cursor.fetchall():
+            total += max(int(fraud_count or 0) - int(false_count or 0), 0)
+            organizations.add(other_org)
+    if not total:
+        return None
+    return {
+        "category": "CONSORTIUM",
+        "label": "Shared fraud-network reputation",
+        "points": min(40, 10 + total * 5),
+        "evidence": f"Hashed identity matched confirmed fraud at {len(organizations)} other organization(s)",
+    }
+
+
+def deliver_alerts(cursor, organization_id: int, alert: dict):
+    severity = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
+    cursor.execute("""
+        SELECT id, channel, target, minimum_risk
+        FROM alert_destinations
+        WHERE organization_id = %s AND enabled = TRUE
+    """, (organization_id,))
+    message = {
+        "title": "HIGH RISK TRANSACTION",
+        "user": alert["user_id"],
+        "risk": alert["risk_score"],
+        "action": alert["recommended_action"],
+        "reason": alert["reason"],
+    }
+    for destination_id, channel, target, minimum_risk in cursor.fetchall():
+        if severity.get(alert["risk_level"], 0) < severity.get(minimum_risk, 2):
+            continue
+        status = "SENT"
+        try:
+            if channel in {"SLACK", "TEAMS", "WEBHOOK"}:
+                body = json.dumps({"text": f"{message['title']}\nUser: {message['user']}\nRisk: {message['risk']}\nAction: {message['action']}", **message}).encode()
+                request = urllib.request.Request(target, data=body, headers={"Content-Type": "application/json"}, method="POST")
+                with urllib.request.urlopen(request, timeout=4):
+                    pass
+            elif channel == "EMAIL":
+                smtp_host = os.getenv("SMTP_HOST")
+                if not smtp_host:
+                    raise ValueError("SMTP_HOST is not configured")
+                with smtplib.SMTP(smtp_host, int(os.getenv("SMTP_PORT", "587")), timeout=5) as smtp:
+                    smtp.starttls()
+                    smtp.login(os.getenv("SMTP_USERNAME", ""), os.getenv("SMTP_PASSWORD", ""))
+                    smtp.sendmail(os.getenv("SMTP_FROM", "alerts@boujuron.ai"), target, f"Subject: Boujuron Fraud Alert\n\n{json.dumps(message, indent=2)}")
+        except Exception as exc:
+            status = f"FAILED: {str(exc)[:120]}"
+        cursor.execute("UPDATE alert_destinations SET last_status = %s, last_sent_at = CURRENT_TIMESTAMP WHERE id = %s", (status, destination_id))
+
+
 @app.get("/decision-rules", response_model=list[DecisionRuleResponse])
 def list_decision_rules(current_user: AuthUserResponse = Depends(get_current_user)):
     conn, cursor = get_db()
@@ -1832,6 +2044,88 @@ def delete_decision_rule(rule_id: int, current_user: AuthUserResponse = Depends(
     if not deleted:
         raise HTTPException(status_code=404, detail="Rule not found")
     return {"message": "Rule deleted"}
+
+
+@app.get("/alert-destinations", response_model=list[AlertDestinationResponse])
+def list_alert_destinations(current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    ensure_decision_rule_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    cursor.execute("""
+        SELECT id, name, channel, target, minimum_risk, enabled, last_status, last_sent_at, created_at
+        FROM alert_destinations WHERE organization_id = %s ORDER BY id
+    """, (organization_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [AlertDestinationResponse(id=r[0], name=r[1], channel=r[2], target=r[3], minimum_risk=r[4], enabled=r[5], last_status=r[6], last_sent_at=str(r[7]) if r[7] else None, created_at=str(r[8])) for r in rows]
+
+
+@app.post("/alert-destinations", response_model=AlertDestinationResponse)
+def create_alert_destination(payload: AlertDestinationRequest, current_user: AuthUserResponse = Depends(get_current_user)):
+    require_admin(current_user)
+    conn, cursor = get_db()
+    ensure_decision_rule_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    cursor.execute("""
+        INSERT INTO alert_destinations (organization_id, name, channel, target, minimum_risk, enabled)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id, name, channel, target, minimum_risk, enabled, last_status, last_sent_at, created_at
+    """, (organization_id, payload.name, payload.channel, payload.target, payload.minimum_risk.upper(), payload.enabled))
+    r = cursor.fetchone()
+    conn.commit()
+    conn.close()
+    return AlertDestinationResponse(id=r[0], name=r[1], channel=r[2], target=r[3], minimum_risk=r[4], enabled=r[5], last_status=r[6], last_sent_at=None, created_at=str(r[8]))
+
+
+@app.delete("/alert-destinations/{destination_id}")
+def delete_alert_destination(destination_id: int, current_user: AuthUserResponse = Depends(get_current_user)):
+    require_admin(current_user)
+    conn, cursor = get_db()
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    cursor.execute("DELETE FROM alert_destinations WHERE id = %s AND organization_id = %s RETURNING id", (destination_id, organization_id))
+    deleted = cursor.fetchone()
+    conn.commit()
+    conn.close()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Destination not found")
+    return {"message": "Destination deleted"}
+
+
+@app.get("/consortium/settings", response_model=ConsortiumSettingsResponse)
+def get_consortium_settings(current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    ensure_decision_rule_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    cursor.execute("""
+        INSERT INTO consortium_settings (organization_id) VALUES (%s)
+        ON CONFLICT (organization_id) DO NOTHING
+    """, (organization_id,))
+    cursor.execute("SELECT enabled, share_devices, share_ips, share_emails, share_phones FROM consortium_settings WHERE organization_id = %s", (organization_id,))
+    row = cursor.fetchone()
+    conn.commit()
+    conn.close()
+    return ConsortiumSettingsResponse(enabled=row[0], share_devices=row[1], share_ips=row[2], share_emails=row[3], share_phones=row[4])
+
+
+@app.patch("/consortium/settings", response_model=ConsortiumSettingsResponse)
+def update_consortium_settings(payload: ConsortiumSettingsUpdate, current_user: AuthUserResponse = Depends(get_current_user)):
+    require_admin(current_user)
+    conn, cursor = get_db()
+    ensure_decision_rule_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    cursor.execute("""
+        INSERT INTO consortium_settings (organization_id, enabled, share_devices, share_ips, share_emails, share_phones)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON CONFLICT (organization_id) DO UPDATE SET enabled=EXCLUDED.enabled,
+          share_devices=EXCLUDED.share_devices, share_ips=EXCLUDED.share_ips,
+          share_emails=EXCLUDED.share_emails, share_phones=EXCLUDED.share_phones,
+          updated_at=CURRENT_TIMESTAMP
+        RETURNING enabled, share_devices, share_ips, share_emails, share_phones
+    """, (organization_id, payload.enabled, payload.share_devices, payload.share_ips, payload.share_emails, payload.share_phones))
+    row = cursor.fetchone()
+    conn.commit()
+    conn.close()
+    return ConsortiumSettingsResponse(enabled=row[0], share_devices=row[1], share_ips=row[2], share_emails=row[3], share_phones=row[4])
 
 
 @app.get("/behavior/settings", response_model=BehaviorSettingsResponse)
@@ -2112,6 +2406,13 @@ async def score_risk(
     behavior["device_intelligence"] = device_data
     behavior["account_takeover"] = takeover_context
     result = analyze_event(event, behavior)
+    shared_signal = consortium_signal(cursor, organization_id, event, device_data)
+    if shared_signal:
+        result["signals"].append(shared_signal)
+        result["reasons"].append(shared_signal["label"])
+        result["reason"] = ", ".join(result["reasons"])
+        result["risk_score"] = min(100, result["risk_score"] + shared_signal["points"])
+        result["risk_level"] = "CRITICAL" if result["risk_score"] >= 90 else "HIGH" if result["risk_score"] >= 70 else "MEDIUM"
     action_evaluation = evaluate_decision_rules(cursor, organization_id, event, result, device_data)
     persist_device_intelligence(cursor, organization_id, payload.user_id, event, device_data, result)
     persist_account_security_state(
@@ -2252,6 +2553,7 @@ async def score_risk(
             "signals_triggered": len(result["signals"]),
             "behavioral_match": result["behavioral_match"],
         }
+        deliver_alerts(cursor, organization_id, alert)
 
     update_behavior_profile(
         cursor,
@@ -2644,6 +2946,48 @@ def get_user_profile(user_id: str, current_user: AuthUserResponse = Depends(get_
     )
 
 
+@app.get("/customers/{user_id}/evidence-graph", response_model=EvidenceGraphResponse)
+def get_evidence_graph(user_id: str, current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    prepare_analytics_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    cursor.execute("""
+        SELECT COALESCE(NULLIF(device_id,''), device_type), ip, transaction_id, risk_level
+        FROM events e
+        LEFT JOIN fraud_alerts f ON f.organization_id=e.organization_id AND f.user_id=e.user_id
+        WHERE e.organization_id=%s AND e.user_id=%s
+        ORDER BY e.timestamp DESC LIMIT 50
+    """, (organization_id, user_id))
+    rows = cursor.fetchall()
+    nodes = {"user": EvidenceNode(id=f"user:{user_id}", type="USER", label=user_id, risk="INFO")}
+    edges = {}
+    shared_accounts = set()
+    for device, ip, transaction_id, risk_level in rows:
+        for node_type, value in (("DEVICE", device), ("IP", ip), ("TRANSACTION", transaction_id)):
+            if not value:
+                continue
+            node_id = f"{node_type.lower()}:{value}"
+            nodes[node_id] = EvidenceNode(id=node_id, type=node_type, label=str(value), risk=risk_level or "LOW")
+            edge_key = (f"user:{user_id}", node_id)
+            edges[edge_key] = EvidenceEdge(source=edge_key[0], target=edge_key[1], relationship=f"USES_{node_type}", count=edges.get(edge_key, EvidenceEdge(source="", target="", relationship="")).count + (1 if edge_key in edges else 0))
+        if device:
+            cursor.execute("""
+                SELECT DISTINCT user_id FROM events
+                WHERE organization_id=%s AND user_id<>%s
+                  AND COALESCE(NULLIF(device_id,''), device_type)=%s LIMIT 10
+            """, (organization_id, user_id, device))
+            shared_accounts.update(row[0] for row in cursor.fetchall())
+        if ip:
+            cursor.execute("SELECT DISTINCT user_id FROM events WHERE organization_id=%s AND user_id<>%s AND ip=%s LIMIT 10", (organization_id, user_id, ip))
+            shared_accounts.update(row[0] for row in cursor.fetchall())
+    for account in shared_accounts:
+        node_id = f"user:{account}"
+        nodes[node_id] = EvidenceNode(id=node_id, type="USER", label=account, risk="HIGH")
+        edges[(f"user:{user_id}", node_id)] = EvidenceEdge(source=f"user:{user_id}", target=node_id, relationship="SHARED_IDENTITY")
+    conn.close()
+    return EvidenceGraphResponse(nodes=list(nodes.values()), edges=list(edges.values()), suspected_ring=len(shared_accounts) >= 2)
+
+
 @app.patch("/customers/{user_id}/devices/{fingerprint}", response_model=DeviceProfileResponse)
 def update_device_trust(
     user_id: str,
@@ -2938,6 +3282,7 @@ def update_case(case_id: int, payload: CaseUpdateRequest, current_user: AuthUser
                 SET analyst_feedback = %s, feedback_at = CURRENT_TIMESTAMP
                 WHERE id = %s
             """, (feedback, decision_id))
+            learned_features = []
             if feedback == "FALSE_POSITIVE" and not learned:
                 update_behavior_profile(
                     cursor,
@@ -2948,6 +3293,31 @@ def update_case(case_id: int, payload: CaseUpdateRequest, current_user: AuthUser
                     increment_event=False,
                 )
                 cursor.execute("UPDATE risk_decisions SET learned = TRUE WHERE id = %s", (decision_id,))
+                learned_features = ["trusted_behavior_baseline"]
+            elif feedback == "TRUE_FRAUD":
+                ensure_decision_rule_tables(cursor)
+                cursor.execute("SELECT enabled, share_devices, share_ips FROM consortium_settings WHERE organization_id = %s", (organization_id,))
+                consortium = cursor.fetchone()
+                if consortium and consortium[0]:
+                    entities = []
+                    if consortium[1]:
+                        entities.append(("DEVICE", device_fingerprint(request_payload)))
+                    if consortium[2] and request_payload.get("ip"):
+                        entities.append(("IP", request_payload["ip"]))
+                    for entity_type, value in entities:
+                        cursor.execute("""
+                            INSERT INTO consortium_reputation (entity_type, entity_hash, organization_id, confirmed_fraud_count)
+                            VALUES (%s, %s, %s, 1)
+                            ON CONFLICT (entity_type, entity_hash, organization_id)
+                            DO UPDATE SET confirmed_fraud_count = consortium_reputation.confirmed_fraud_count + 1,
+                                          last_seen_at = CURRENT_TIMESTAMP
+                        """, (entity_type, reputation_hash(entity_type, value), organization_id))
+                    learned_features = [entity_type.lower() for entity_type, _ in entities]
+            cursor.execute("""
+                INSERT INTO feedback_learning_events (organization_id, risk_decision_id, feedback, learned_features)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (risk_decision_id, feedback) DO NOTHING
+            """, (organization_id, decision_id, feedback, Json(learned_features)))
 
     conn.commit()
     conn.close()

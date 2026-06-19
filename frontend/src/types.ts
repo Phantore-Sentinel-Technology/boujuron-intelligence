@@ -62,8 +62,53 @@ export interface ClientApiKey {
   key_prefix: string;
   api_key?: string | null;
   active: boolean;
+  request_count: number;
   last_used_at?: string | null;
   created_at: string;
+}
+
+export interface ApiUsage {
+  total_requests: number;
+  requests_this_month: number;
+  blocked: number;
+  challenged: number;
+  allowed: number;
+}
+
+export interface Invoice {
+  id: number;
+  invoice_number: string;
+  period: string;
+  amount: number;
+  currency: string;
+  status: string;
+  created_at: string;
+}
+
+export interface AlertDestination {
+  id: number;
+  name: string;
+  channel: "SLACK" | "TEAMS" | "EMAIL" | "WEBHOOK";
+  target: string;
+  minimum_risk: RiskLevel;
+  enabled: boolean;
+  last_status?: string | null;
+  last_sent_at?: string | null;
+  created_at: string;
+}
+
+export interface ConsortiumSettings {
+  enabled: boolean;
+  share_devices: boolean;
+  share_ips: boolean;
+  share_emails: boolean;
+  share_phones: boolean;
+}
+
+export interface EvidenceGraph {
+  nodes: Array<{ id: string; type: string; label: string; risk: string; count: number }>;
+  edges: Array<{ source: string; target: string; relationship: string; count: number }>;
+  suspected_ring: boolean;
 }
 
 export interface BehaviorSettings {

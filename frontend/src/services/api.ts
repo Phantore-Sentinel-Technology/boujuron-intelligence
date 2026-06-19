@@ -10,12 +10,17 @@ import type {
   CaseSummary,
   CaseUpdate,
   ClientApiKey,
+  ConsortiumSettings,
   DecisionRule,
+  EvidenceGraph,
   FraudAlert,
   FraudHeatMapPoint,
   IntelligenceActivity,
+  Invoice,
   InviteToken,
   Organization,
+  AlertDestination,
+  ApiUsage,
   RuleCondition,
   RiskDistributionPoint,
   TrendPoint,
@@ -114,6 +119,43 @@ export async function deleteDecisionRule(ruleId: number) {
 
 export async function revokeClientApiKey(keyId: number) {
   await api.delete(`/api-keys/${keyId}`);
+}
+
+export async function rotateClientApiKey(keyId: number) {
+  const response = await api.post<ClientApiKey>(`/api-keys/${keyId}/rotate`);
+  return response.data;
+}
+
+export async function getPortalUsage() {
+  return (await api.get<ApiUsage>("/portal/usage")).data;
+}
+
+export async function getInvoices() {
+  return (await api.get<Invoice[]>("/portal/invoices")).data;
+}
+
+export async function getAlertDestinations() {
+  return (await api.get<AlertDestination[]>("/alert-destinations")).data;
+}
+
+export async function createAlertDestination(payload: Omit<AlertDestination, "id" | "last_status" | "last_sent_at" | "created_at">) {
+  return (await api.post<AlertDestination>("/alert-destinations", payload)).data;
+}
+
+export async function deleteAlertDestination(id: number) {
+  await api.delete(`/alert-destinations/${id}`);
+}
+
+export async function getConsortiumSettings() {
+  return (await api.get<ConsortiumSettings>("/consortium/settings")).data;
+}
+
+export async function updateConsortiumSettings(payload: ConsortiumSettings) {
+  return (await api.patch<ConsortiumSettings>("/consortium/settings", payload)).data;
+}
+
+export async function getEvidenceGraph(userId: string) {
+  return (await api.get<EvidenceGraph>(`/customers/${encodeURIComponent(userId)}/evidence-graph`)).data;
 }
 
 export async function getBehaviorSettings() {

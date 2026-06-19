@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { AlertTriangle, ArrowLeft, History, KeyRound, MapPin, MonitorSmartphone, Network, ShieldAlert, ShieldCheck, ShieldX, TrendingUp } from "lucide-react";
-import type { UserRiskProfile } from "../types";
-import { getUserRiskProfile, updateDeviceTrust } from "../services/api";
+import type { EvidenceGraph, UserRiskProfile } from "../types";
+import { getEvidenceGraph, getUserRiskProfile, updateDeviceTrust } from "../services/api";
 import { RiskBadge } from "../components/RiskBadge";
 import { ScoreBreakdown } from "../components/ScoreBreakdown";
 
@@ -11,11 +11,12 @@ export function CustomerProfile() {
   const [profile, setProfile] = useState<UserRiskProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [updatingDevice, setUpdatingDevice] = useState<string | null>(null);
+  const [graph, setGraph] = useState<EvidenceGraph | null>(null);
 
   useEffect(() => {
     setLoading(true);
-    getUserRiskProfile(userId)
-      .then(setProfile)
+    Promise.all([getUserRiskProfile(userId), getEvidenceGraph(userId)])
+      .then(([profileData, graphData]) => { setProfile(profileData); setGraph(graphData); })
       .finally(() => setLoading(false));
   }, [userId]);
 
@@ -114,6 +115,25 @@ export function CustomerProfile() {
       </div>
 
       <div className="profile-grid wide">
+        <section className="insight-panel profile-card evidence-panel">
+          <div className="section-header compact">
+            <div><p className="eyebrow">Relationship intelligence</p><h3>Evidence Graph</h3></div>
+            <Network size={20} />
+          </div>
+          {graph?.suspected_ring && <div className="form-error">Potential fraud ring detected through shared identities.</div>}
+          <div className="evidence-graph">
+            {graph?.nodes.map((node) => (
+              <div className={`evidence-node ${node.type.toLowerCase()} ${node.risk.toLowerCase()}`} key={node.id}>
+                <span>{node.type}</span><strong>{node.label}</strong>
+              </div>
+            ))}
+            {!graph?.nodes.length && <div className="empty-state slim">No linked evidence yet.</div>}
+          </div>
+          <div className="evidence-links">
+            {graph?.edges.map((edge) => <span key={`${edge.source}-${edge.target}`}>{edge.relationship.replaceAll("_", " ")} · {edge.count}</span>)}
+          </div>
+        </section>
+
         <section className="insight-panel profile-card">
           <div className="section-header compact">
             <div>

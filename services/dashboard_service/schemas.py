@@ -89,8 +89,87 @@ class ApiKeyResponse(BaseModel):
     key_prefix: str
     api_key: str | None = None
     active: bool
+    request_count: int = 0
     last_used_at: str | None = None
     created_at: str
+
+
+class ApiKeyUsageResponse(BaseModel):
+    total_requests: int
+    requests_this_month: int
+    blocked: int
+    challenged: int
+    allowed: int
+
+
+class InvoiceResponse(BaseModel):
+    id: int
+    invoice_number: str
+    period: str
+    amount: float
+    currency: str
+    status: str
+    created_at: str
+
+
+class AlertDestinationRequest(BaseModel):
+    name: str
+    channel: str
+    target: str
+    minimum_risk: str = "HIGH"
+    enabled: bool = True
+
+    @field_validator("channel")
+    @classmethod
+    def validate_channel(cls, value):
+        normalized = value.upper()
+        if normalized not in {"SLACK", "TEAMS", "EMAIL", "WEBHOOK"}:
+            raise ValueError("channel must be SLACK, TEAMS, EMAIL, or WEBHOOK")
+        return normalized
+
+
+class AlertDestinationResponse(AlertDestinationRequest):
+    id: int
+    last_status: str | None = None
+    last_sent_at: str | None = None
+    created_at: str
+
+
+class EvidenceNode(BaseModel):
+    id: str
+    type: str
+    label: str
+    risk: str
+    count: int = 1
+
+
+class EvidenceEdge(BaseModel):
+    source: str
+    target: str
+    relationship: str
+    count: int = 1
+
+
+class EvidenceGraphResponse(BaseModel):
+    nodes: list[EvidenceNode]
+    edges: list[EvidenceEdge]
+    suspected_ring: bool
+
+
+class ConsortiumSettingsResponse(BaseModel):
+    enabled: bool
+    share_devices: bool
+    share_ips: bool
+    share_emails: bool
+    share_phones: bool
+
+
+class ConsortiumSettingsUpdate(BaseModel):
+    enabled: bool
+    share_devices: bool = True
+    share_ips: bool = True
+    share_emails: bool = False
+    share_phones: bool = False
 
 
 class BehaviorSettingsResponse(BaseModel):
