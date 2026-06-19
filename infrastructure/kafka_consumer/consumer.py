@@ -302,6 +302,7 @@ for msg in consumer:
             response = requests.post(
                 "http://dashboard:8000/internal/fraud",
                 json=result,
+                headers={"X-Internal-Secret": settings.JWT_SECRET},
                 timeout=5
             )
 

@@ -48,6 +48,19 @@ class AuthTokenResponse(BaseModel):
     user: AuthUserResponse
 
 
+class OrganizationCreateRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    admin_email: str
+
+
+class OrganizationResponse(BaseModel):
+    id: int
+    name: str
+    slug: str
+    admin_invite_url: str | None = None
+    created_at: str
+
+
 class InviteCreateRequest(BaseModel):
     email: str
     role: UserRole = "Read-Only Auditor"
@@ -172,6 +185,58 @@ class RiskSignalResponse(BaseModel):
     evidence: str
 
 
+class RuleCondition(BaseModel):
+    field: str
+    operator: str
+    value: Any
+
+    @field_validator("field")
+    @classmethod
+    def validate_field(cls, value):
+        allowed = {
+            "amount", "risk_score", "risk_level", "event_type", "location", "network",
+            "device_type", "is_new_device", "is_rooted", "is_emulator",
+            "browser_tampering", "sim_swap_detected", "failed_login_count",
+        }
+        if value not in allowed:
+            raise ValueError(f"field must be one of: {', '.join(sorted(allowed))}")
+        return value
+
+    @field_validator("operator")
+    @classmethod
+    def validate_operator(cls, value):
+        normalized = value.upper()
+        allowed = {"EQ", "NEQ", "GT", "GTE", "LT", "LTE", "IN", "CONTAINS"}
+        if normalized not in allowed:
+            raise ValueError(f"operator must be one of: {', '.join(sorted(allowed))}")
+        return normalized
+
+
+class DecisionRuleRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    conditions: list[RuleCondition] = Field(min_length=1, max_length=10)
+    action: str
+    score_adjustment: int = Field(default=0, ge=0, le=100)
+    priority: int = Field(default=100, ge=1, le=10000)
+    enabled: bool = True
+
+    @field_validator("action")
+    @classmethod
+    def validate_action(cls, value):
+        normalized = value.upper()
+        if normalized not in {"ALLOW", "CHALLENGE", "BLOCK"}:
+            raise ValueError("action must be ALLOW, CHALLENGE, or BLOCK")
+        return normalized
+
+
+class DecisionRuleResponse(DecisionRuleRequest):
+    id: int
+    organization_id: int
+    created_by: str | None = None
+    created_at: str
+    updated_at: str
+
+
 class DeviceIntelligenceResponse(BaseModel):
     fingerprint: str
     status: str
@@ -205,6 +270,8 @@ class RiskScoreResponse(BaseModel):
     behavioral_match: bool
     device_intelligence: DeviceIntelligenceResponse | None = None
     account_takeover: AccountTakeoverResponse | None = None
+    action_decision_id: int | None = None
+    matched_rules: list[str] = Field(default_factory=list)
     created_at: str
 
 

@@ -36,6 +36,14 @@ export interface AuthResponse {
   user: AuthUser;
 }
 
+export interface Organization {
+  id: number;
+  name: string;
+  slug: string;
+  admin_invite_url?: string | null;
+  created_at: string;
+}
+
 export interface InviteToken {
   id: number;
   token: string;
@@ -84,6 +92,41 @@ export interface BehaviorEvaluation {
   false_positive_rate: number;
   profiles_learning: number;
   trusted_events_learned: number;
+}
+
+export type RuleField =
+  | "amount"
+  | "risk_score"
+  | "risk_level"
+  | "event_type"
+  | "location"
+  | "network"
+  | "device_type"
+  | "is_new_device"
+  | "is_rooted"
+  | "is_emulator"
+  | "browser_tampering"
+  | "sim_swap_detected"
+  | "failed_login_count";
+
+export interface RuleCondition {
+  field: RuleField;
+  operator: "EQ" | "NEQ" | "GT" | "GTE" | "LT" | "LTE" | "IN" | "CONTAINS";
+  value: string | number | boolean | string[];
+}
+
+export interface DecisionRule {
+  id: number;
+  organization_id: number;
+  name: string;
+  conditions: RuleCondition[];
+  action: "ALLOW" | "CHALLENGE" | "BLOCK";
+  score_adjustment: number;
+  priority: number;
+  enabled: boolean;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ScoreBreakdownItem {

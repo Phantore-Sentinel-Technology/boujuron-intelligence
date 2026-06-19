@@ -1,12 +1,17 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Activity, Code2, Copy, KeyRound, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
-import type { BehaviorEvaluation, BehaviorSettings, ClientApiKey, InviteToken, UserRole } from "../types";
+import { Activity, Building2, Code2, Copy, KeyRound, Plus, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
+import type { BehaviorEvaluation, BehaviorSettings, ClientApiKey, DecisionRule, InviteToken, Organization, RuleCondition, RuleField, UserRole } from "../types";
 import {
   createClientApiKey,
+  createDecisionRule,
   createInvite,
+  createOrganization,
+  deleteDecisionRule,
   getBehaviorEvaluation,
   getBehaviorSettings,
   getClientApiKeys,
+  getCurrentOrganization,
+  getDecisionRules,
   getInvites,
   revokeClientApiKey,
   updateBehaviorSettings
@@ -21,6 +26,8 @@ const thresholds = [
 ];
 
 const inviteRoles: UserRole[] = ["Read-Only Auditor", "Fraud Analyst", "Investigator", "Admin"];
+const ruleFields: RuleField[] = ["amount", "risk_score", "risk_level", "event_type", "location", "network", "device_type", "is_new_device", "is_rooted", "is_emulator", "browser_tampering", "sim_swap_detected", "failed_login_count"];
+const ruleOperators: RuleCondition["operator"][] = ["EQ", "NEQ", "GT", "GTE", "LT", "LTE", "IN", "CONTAINS"];
 
 export function Settings() {
   const { user } = useAuth();
@@ -41,17 +48,31 @@ export function Settings() {
   const [evaluation, setEvaluation] = useState<BehaviorEvaluation | null>(null);
   const [behaviorMessage, setBehaviorMessage] = useState("");
   const [savingBehavior, setSavingBehavior] = useState(false);
+  const [organization, setOrganization] = useState<Organization | null>(null);
+  const [tenantName, setTenantName] = useState("");
+  const [tenantAdminEmail, setTenantAdminEmail] = useState("");
+  const [tenantMessage, setTenantMessage] = useState("");
+  const [rules, setRules] = useState<DecisionRule[]>([]);
+  const [ruleName, setRuleName] = useState("");
+  const [ruleAction, setRuleAction] = useState<DecisionRule["action"]>("BLOCK");
+  const [ruleScore, setRuleScore] = useState(20);
+  const [rulePriority, setRulePriority] = useState(100);
+  const [ruleConditions, setRuleConditions] = useState<RuleCondition[]>([{ field: "amount", operator: "GT", value: 1000000 }]);
+  const [ruleMessage, setRuleMessage] = useState("");
+  const [savingRule, setSavingRule] = useState(false);
   const isAdmin = user?.role === "Admin";
 
   useEffect(() => {
     setLoadingInvites(true);
     const adminRequests = isAdmin ? Promise.all([getInvites(), getClientApiKeys()]) : Promise.resolve([[], []] as [InviteToken[], ClientApiKey[]]);
-    Promise.all([adminRequests, getBehaviorSettings(), getBehaviorEvaluation()])
-      .then(([[inviteData, apiKeyData], settingsData, evaluationData]) => {
+    Promise.all([adminRequests, getBehaviorSettings(), getBehaviorEvaluation(), getCurrentOrganization(), getDecisionRules()])
+      .then(([[inviteData, apiKeyData], settingsData, evaluationData, organizationData, rulesData]) => {
         setInvites(inviteData);
         setApiKeys(apiKeyData);
         setBehaviorSettings(settingsData);
         setEvaluation(evaluationData);
+        setOrganization(organizationData);
+        setRules(rulesData);
       })
       .catch(() => setMessage("Could not load all platform settings."))
       .finally(() => setLoadingInvites(false));
@@ -140,6 +161,57 @@ export function Settings() {
     }
   }
 
+  async function onCreateTenant(event: FormEvent) {
+    event.preventDefault();
+    setTenantMessage("");
+    try {
+      const created = await createOrganization(tenantName, tenantAdminEmail);
+      setTenantMessage(`Tenant created. Admin invite: ${created.admin_invite_url}`);
+      setTenantName("");
+      setTenantAdminEmail("");
+    } catch {
+      setTenantMessage("Could not create tenant. Confirm the name is unique and you have Admin access.");
+    }
+  }
+
+  function updateRuleCondition(index: number, changes: Partial<RuleCondition>) {
+    setRuleConditions((current) => current.map((condition, conditionIndex) =>
+      conditionIndex === index ? { ...condition, ...changes } : condition
+    ));
+  }
+
+  async function onCreateRule(event: FormEvent) {
+    event.preventDefault();
+    setSavingRule(true);
+    setRuleMessage("");
+    try {
+      const created = await createDecisionRule({
+        name: ruleName,
+        conditions: ruleConditions.map((condition) => ({
+          ...condition,
+          value: ["GT", "GTE", "LT", "LTE"].includes(condition.operator) ? Number(condition.value) : condition.value
+        })),
+        action: ruleAction,
+        score_adjustment: ruleScore,
+        priority: rulePriority,
+        enabled: true
+      });
+      setRules((current) => [...current, created].sort((left, right) => left.priority - right.priority));
+      setRuleName("");
+      setRuleMessage("Decision rule activated.");
+    } catch {
+      setRuleMessage("Could not create rule. Check the conditions and rule name.");
+    } finally {
+      setSavingRule(false);
+    }
+  }
+
+  async function removeRule(ruleId: number) {
+    await deleteDecisionRule(ruleId);
+    setRules((current) => current.filter((rule) => rule.id !== ruleId));
+    setRuleMessage("Decision rule deleted.");
+  }
+
   return (
     <div className="page-grid">
       <section className="insight-panel">
@@ -157,6 +229,74 @@ export function Settings() {
               <em>{action}</em>
             </div>
           ))}
+        </div>
+      </section>
+
+      <section className="insight-panel access-panel">
+        <div className="section-header">
+          <div>
+            <p className="eyebrow">Tenant isolation</p>
+            <h2>{organization?.name || "Organization"}</h2>
+          </div>
+          <Building2 size={22} />
+        </div>
+        <p className="settings-copy">Users, API keys, events, alerts, cases, exports, analytics, rules, and live notifications are isolated by organization.</p>
+        {isAdmin && organization?.slug === "boujuron" && (
+          <form className="tenant-form" onSubmit={onCreateTenant}>
+            <label><span>New tenant name</span><input value={tenantName} onChange={(event) => setTenantName(event.target.value)} placeholder="Acme Fintech" required /></label>
+            <label><span>Tenant admin email</span><input value={tenantAdminEmail} onChange={(event) => setTenantAdminEmail(event.target.value)} type="email" placeholder="admin@acme.com" required /></label>
+            <button className="primary-button"><Building2 size={17} />Provision tenant</button>
+          </form>
+        )}
+        {tenantMessage && <p className="form-success tenant-message">{tenantMessage}</p>}
+      </section>
+
+      <section className="insight-panel access-panel">
+        <div className="section-header">
+          <div>
+            <p className="eyebrow">No-code enforcement</p>
+            <h2>Decision Rules</h2>
+          </div>
+          <SlidersHorizontal size={22} />
+        </div>
+        {isAdmin && (
+          <form className="rule-builder" onSubmit={onCreateRule}>
+            <div className="rule-meta-grid">
+              <label><span>Rule name</span><input value={ruleName} onChange={(event) => setRuleName(event.target.value)} placeholder="Block large new-device transfers" required /></label>
+              <label><span>Action</span><select value={ruleAction} onChange={(event) => setRuleAction(event.target.value as DecisionRule["action"])}><option>ALLOW</option><option>CHALLENGE</option><option>BLOCK</option></select></label>
+              <NumberSetting label="Score adjustment" value={ruleScore} onChange={setRuleScore} disabled={false} />
+              <NumberSetting label="Priority" value={rulePriority} onChange={setRulePriority} disabled={false} />
+            </div>
+            <div className="rule-condition-list">
+              {ruleConditions.map((condition, index) => (
+                <div className="rule-condition" key={`${condition.field}-${index}`}>
+                  <select value={condition.field} onChange={(event) => updateRuleCondition(index, { field: event.target.value as RuleField })}>
+                    {ruleFields.map((field) => <option key={field} value={field}>{field.replaceAll("_", " ")}</option>)}
+                  </select>
+                  <select value={condition.operator} onChange={(event) => updateRuleCondition(index, { operator: event.target.value as RuleCondition["operator"] })}>
+                    {ruleOperators.map((operator) => <option key={operator}>{operator}</option>)}
+                  </select>
+                  <input value={String(condition.value)} onChange={(event) => updateRuleCondition(index, { value: event.target.value })} aria-label={`Condition ${index + 1} value`} />
+                  <button type="button" className="icon-button" title="Remove condition" disabled={ruleConditions.length === 1} onClick={() => setRuleConditions((current) => current.filter((_, itemIndex) => itemIndex !== index))}><Trash2 size={15} /></button>
+                </div>
+              ))}
+            </div>
+            <div className="rule-builder-actions">
+              <button type="button" className="small-button" onClick={() => setRuleConditions((current) => [...current, { field: "is_new_device", operator: "EQ", value: true }])}><Plus size={15} />Add AND condition</button>
+              <button className="primary-button" disabled={savingRule}>{savingRule ? "Activating..." : "Activate rule"}</button>
+            </div>
+          </form>
+        )}
+        {ruleMessage && <p className="form-success">{ruleMessage}</p>}
+        <div className="rule-list">
+          {rules.map((rule) => (
+            <div className="rule-row" key={rule.id}>
+              <div><strong>{rule.name}</strong><span>{rule.conditions.map((condition) => `${condition.field} ${condition.operator} ${String(condition.value)}`).join(" AND ")}</span></div>
+              <span className={`rule-action ${rule.action.toLowerCase()}`}>{rule.action}</span>
+              {isAdmin && <button className="icon-button" title="Delete rule" onClick={() => removeRule(rule.id)}><Trash2 size={15} /></button>}
+            </div>
+          ))}
+          {rules.length === 0 && <div className="empty-state slim">No organization rules configured.</div>}
         </div>
       </section>
 

@@ -42,6 +42,8 @@ from services.dashboard_service.schemas import (
     DemoFraudEventRequest,
     DeviceProfileResponse,
     DeviceTrustUpdate,
+    DecisionRuleRequest,
+    DecisionRuleResponse,
     EventResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
@@ -53,6 +55,8 @@ from services.dashboard_service.schemas import (
     IntelligenceActivityResponse,
     InvestigationFeedItemResponse,
     NotificationResponse,
+    OrganizationCreateRequest,
+    OrganizationResponse,
     RiskTimelinePoint,
     RiskDistributionResponse,
     RiskScoreRequest,
@@ -257,6 +261,8 @@ def ensure_auth_tables(cursor):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cursor.execute("ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS organization_id INTEGER")
+    cursor.execute("UPDATE invite_tokens SET organization_id = %s WHERE organization_id IS NULL", (organization_id,))
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS client_api_keys (
             id SERIAL PRIMARY KEY,
@@ -302,6 +308,11 @@ def ensure_event_table(cursor):
             ALTER TABLE events
             ADD COLUMN IF NOT EXISTS {column_name} {column_type}
         """)
+    cursor.execute("""
+        UPDATE events
+        SET organization_id = (SELECT id FROM organizations WHERE slug = 'boujuron')
+        WHERE organization_id IS NULL
+    """)
 
 
 def ensure_risk_decision_table(cursor):
@@ -332,11 +343,19 @@ def ensure_risk_decision_table(cursor):
         ("learned", "BOOLEAN DEFAULT FALSE"),
         ("device_intelligence", "JSONB"),
         ("account_takeover", "JSONB"),
+        ("action_decision_id", "INTEGER"),
+        ("matched_rules", "JSONB DEFAULT '[]'::jsonb"),
     ):
         cursor.execute(f"""
             ALTER TABLE risk_decisions
             ADD COLUMN IF NOT EXISTS {column_name} {column_type}
         """)
+    cursor.execute("ALTER TABLE risk_decisions DROP CONSTRAINT IF EXISTS risk_decisions_idempotency_key_key")
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS risk_decisions_org_idempotency_key
+        ON risk_decisions (organization_id, idempotency_key)
+        WHERE idempotency_key IS NOT NULL
+    """)
 
 
 def ensure_fraud_alert_table(cursor):
@@ -377,6 +396,12 @@ def ensure_case_tables(cursor):
             resolved_at TIMESTAMP
         )
     """)
+    cursor.execute("ALTER TABLE cases ADD COLUMN IF NOT EXISTS organization_id INTEGER")
+    cursor.execute("""
+        UPDATE cases
+        SET organization_id = (SELECT id FROM organizations WHERE slug = 'boujuron')
+        WHERE organization_id IS NULL
+    """)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS case_notes (
             id SERIAL PRIMARY KEY,
@@ -398,6 +423,40 @@ def ensure_case_tables(cursor):
     """)
 
 
+def ensure_decision_rule_tables(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS decision_rules (
+            id SERIAL PRIMARY KEY,
+            organization_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            conditions JSONB NOT NULL DEFAULT '[]'::jsonb,
+            action TEXT NOT NULL,
+            score_adjustment INTEGER DEFAULT 0,
+            priority INTEGER DEFAULT 100,
+            enabled BOOLEAN DEFAULT TRUE,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (organization_id, name)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS action_decisions (
+            id SERIAL PRIMARY KEY,
+            organization_id INTEGER NOT NULL,
+            risk_decision_id INTEGER,
+            transaction_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            model_action TEXT NOT NULL,
+            final_action TEXT NOT NULL,
+            matched_rules JSONB DEFAULT '[]'::jsonb,
+            status TEXT DEFAULT 'DECIDED',
+            reason TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+
 def ensure_fraud_alert_columns(cursor):
     for column_name, column_type in (
         ("organization_id", "INTEGER"),
@@ -411,6 +470,11 @@ def ensure_fraud_alert_columns(cursor):
             ALTER TABLE fraud_alerts
             ADD COLUMN IF NOT EXISTS {column_name} {column_type}
         """)
+    cursor.execute("""
+        UPDATE fraud_alerts
+        SET organization_id = (SELECT id FROM organizations WHERE slug = 'boujuron')
+        WHERE organization_id IS NULL
+    """)
 
 
 def prepare_analytics_tables(cursor):
@@ -420,7 +484,7 @@ def prepare_analytics_tables(cursor):
     ensure_fraud_alert_table(cursor)
     ensure_case_tables(cursor)
     ensure_risk_decision_table(cursor)
-    materialize_cases_from_alerts(cursor)
+    ensure_decision_rule_tables(cursor)
 
 
 def csv_response(filename: str, headers: list[str], rows: list[tuple]) -> Response:
@@ -482,11 +546,19 @@ def recommended_action_from_risk(risk_level: str | None) -> str:
     }.get((risk_level or "LOW").upper(), "REVIEW")
 
 
-def materialize_cases_from_alerts(cursor):
+def materialize_cases_from_alerts(cursor, organization_id: int | None = None):
     ensure_fraud_alert_table(cursor)
+    ensure_case_tables(cursor)
+    cursor.execute("""
+        UPDATE cases c
+        SET organization_id = f.organization_id
+        FROM fraud_alerts f
+        WHERE c.fraud_alert_id = f.id AND c.organization_id IS NULL
+    """)
     cursor.execute("""
         SELECT
             id,
+            organization_id,
             user_id,
             reason,
             risk_score,
@@ -494,11 +566,12 @@ def materialize_cases_from_alerts(cursor):
             recommended_action,
             timestamp
         FROM fraud_alerts
+        WHERE (%s IS NULL OR organization_id = %s)
         ORDER BY id ASC
-    """)
+    """, (organization_id, organization_id))
     alerts = cursor.fetchall()
     for alert in alerts:
-        alert_id, user_id, reason, risk_score, risk_level, recommended_action, timestamp = alert
+        alert_id, alert_organization_id, user_id, reason, risk_score, risk_level, recommended_action, timestamp = alert
         cursor.execute("SELECT id FROM cases WHERE fraud_alert_id = %s", (alert_id,))
         if cursor.fetchone():
             continue
@@ -506,6 +579,7 @@ def materialize_cases_from_alerts(cursor):
         cursor.execute("""
             INSERT INTO cases (
                 case_number,
+                organization_id,
                 fraud_alert_id,
                 user_id,
                 reason,
@@ -516,10 +590,11 @@ def materialize_cases_from_alerts(cursor):
                 created_at,
                 updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
             RETURNING id
         """, (
             f"CASE-{alert_id:04d}",
+            alert_organization_id,
             alert_id,
             user_id,
             reason or "",
@@ -670,6 +745,20 @@ def authenticate_risk_client(
         "role": user.role,
         "organization_id": user.organization_id,
     }
+
+
+async def broadcast_alert(alert: dict, organization_id: int):
+    disconnected = []
+    for connection in clients:
+        if connection["organization_id"] != organization_id:
+            continue
+        try:
+            await connection["websocket"].send_json(alert)
+        except Exception:
+            disconnected.append(connection)
+    for connection in disconnected:
+        if connection in clients:
+            clients.remove(connection)
 
 
 def api_key_response(row, api_key: str | None = None) -> ApiKeyResponse:
@@ -1070,7 +1159,7 @@ def behavioral_context(cursor, organization_id: int, user_id: str, event_timesta
                 COALESCE(ARRAY_AGG(DISTINCT LOWER(NULLIF(location, '')))
                     FILTER (WHERE location IS NOT NULL AND location <> ''), '{}')
             FROM events
-            WHERE user_id = %s AND (organization_id = %s OR organization_id IS NULL)
+            WHERE user_id = %s AND organization_id = %s
         """, (user_id, organization_id))
         history = cursor.fetchone()
         trusted_event_count = history[0] or 0
@@ -1107,7 +1196,7 @@ def behavioral_context(cursor, organization_id: int, user_id: str, event_timesta
             COUNT(*) FILTER (WHERE LOWER(event_type) IN ('login', 'login_success', 'login_failure', 'multiple_failed_logins'))
         FROM events
         WHERE user_id = %s
-          AND (organization_id = %s OR organization_id IS NULL)
+          AND organization_id = %s
           AND timestamp >= %s
           AND timestamp <= %s
     """, (user_id, organization_id, window_start, timestamp))
@@ -1334,6 +1423,65 @@ def invite_response(row) -> InviteResponse:
     )
 
 
+def organization_slug(name: str) -> str:
+    base = "".join(character.lower() if character.isalnum() else "-" for character in name).strip("-")
+    return "-".join(part for part in base.split("-") if part)[:80] or f"tenant-{secrets.token_hex(4)}"
+
+
+@app.post("/organizations", response_model=OrganizationResponse)
+def create_organization(
+    payload: OrganizationCreateRequest,
+    current_user: AuthUserResponse = Depends(get_current_user),
+):
+    require_admin(current_user)
+    conn, cursor = get_db()
+    ensure_auth_tables(cursor)
+    cursor.execute("SELECT slug FROM organizations WHERE id = %s", (current_user.organization_id,))
+    owner_organization = cursor.fetchone()
+    if not owner_organization or owner_organization[0] != "boujuron":
+        conn.close()
+        raise HTTPException(status_code=403, detail="Only the Boujuron platform organization can provision tenants")
+    slug = organization_slug(payload.name)
+    cursor.execute("SELECT id FROM organizations WHERE slug = %s OR LOWER(name) = LOWER(%s)", (slug, payload.name.strip()))
+    if cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=409, detail="Organization already exists")
+    cursor.execute("""
+        INSERT INTO organizations (name, slug)
+        VALUES (%s, %s)
+        RETURNING id, name, slug, created_at
+    """, (payload.name.strip(), slug))
+    organization = cursor.fetchone()
+    cursor.execute("INSERT INTO organization_risk_settings (organization_id) VALUES (%s)", (organization[0],))
+    token = create_invite_token()
+    expires_at = datetime.utcnow() + timedelta(hours=24)
+    cursor.execute("""
+        INSERT INTO invite_tokens (token, email, role, expires_at, created_by, organization_id)
+        VALUES (%s, %s, 'Admin', %s, %s, %s)
+    """, (token, payload.admin_email.lower(), expires_at, current_user.id, organization[0]))
+    conn.commit()
+    conn.close()
+    return OrganizationResponse(
+        id=organization[0],
+        name=organization[1],
+        slug=organization[2],
+        admin_invite_url=invite_url(token),
+        created_at=str(organization[3]),
+    )
+
+
+@app.get("/organizations/current", response_model=OrganizationResponse)
+def current_organization(current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    cursor.execute("SELECT id, name, slug, created_at FROM organizations WHERE id = %s", (organization_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return OrganizationResponse(id=row[0], name=row[1], slug=row[2], created_at=str(row[3]))
+
+
 @app.post("/auth/invites", response_model=InviteResponse)
 def create_invite(payload: InviteCreateRequest, current_user: AuthUserResponse = Depends(get_current_user)):
     require_admin(current_user)
@@ -1344,10 +1492,18 @@ def create_invite(payload: InviteCreateRequest, current_user: AuthUserResponse =
     token = create_invite_token()
     expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
     cursor.execute("""
-        INSERT INTO invite_tokens (token, email, role, expires_at, created_by)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO invite_tokens (token, email, role, expires_at, created_by, organization_id)
+        VALUES (%s, %s, %s, %s, %s, %s)
         RETURNING id, token, email, role, expires_at, used_at, %s AS created_by, created_at
-    """, (token, payload.email.lower(), role, expires_at, current_user.id, current_user.name))
+    """, (
+        token,
+        payload.email.lower(),
+        role,
+        expires_at,
+        current_user.id,
+        current_user.organization_id or default_organization_id(cursor),
+        current_user.name,
+    ))
     row = cursor.fetchone()
     conn.commit()
     conn.close()
@@ -1371,9 +1527,10 @@ def list_invites(current_user: AuthUserResponse = Depends(get_current_user)):
             i.created_at
         FROM invite_tokens i
         LEFT JOIN app_users u ON u.id = i.created_by
+        WHERE i.organization_id = %s
         ORDER BY i.created_at DESC
         LIMIT 50
-    """)
+    """, (current_user.organization_id or default_organization_id(cursor),))
     rows = cursor.fetchall()
     conn.close()
     return [invite_response(row) for row in rows]
@@ -1411,9 +1568,10 @@ def list_api_keys(current_user: AuthUserResponse = Depends(get_current_user)):
     cursor.execute("""
         SELECT id, name, key_prefix, active, last_used_at, created_at
         FROM client_api_keys
+        WHERE organization_id = %s
         ORDER BY created_at DESC
         LIMIT 100
-    """)
+    """, (current_user.organization_id or default_organization_id(cursor),))
     rows = cursor.fetchall()
     conn.close()
     return [api_key_response(row) for row in rows]
@@ -1424,7 +1582,10 @@ def revoke_api_key(key_id: int, current_user: AuthUserResponse = Depends(get_cur
     require_admin(current_user)
     conn, cursor = get_db()
     ensure_auth_tables(cursor)
-    cursor.execute("UPDATE client_api_keys SET active = FALSE WHERE id = %s RETURNING id", (key_id,))
+    cursor.execute(
+        "UPDATE client_api_keys SET active = FALSE WHERE id = %s AND organization_id = %s RETURNING id",
+        (key_id, current_user.organization_id or default_organization_id(cursor)),
+    )
     revoked = cursor.fetchone()
     conn.commit()
     conn.close()
@@ -1442,6 +1603,235 @@ def behavior_settings_response(cursor, organization_id: int) -> BehaviorSettings
         organization_name=organization[0] if organization else "Organization",
         **settings_data,
     )
+
+
+def rule_response(row) -> DecisionRuleResponse:
+    return DecisionRuleResponse(
+        id=row[0],
+        organization_id=row[1],
+        name=row[2],
+        conditions=row[3] or [],
+        action=row[4],
+        score_adjustment=int(row[5] or 0),
+        priority=int(row[6] or 100),
+        enabled=bool(row[7]),
+        created_by=row[8],
+        created_at=str(row[9]),
+        updated_at=str(row[10]),
+    )
+
+
+def compare_rule_value(actual, operator: str, expected) -> bool:
+    if operator in {"GT", "GTE", "LT", "LTE"}:
+        try:
+            actual, expected = float(actual), float(expected)
+        except (TypeError, ValueError):
+            return False
+    if operator == "EQ":
+        return str(actual).lower() == str(expected).lower()
+    if operator == "NEQ":
+        return str(actual).lower() != str(expected).lower()
+    if operator == "GT":
+        return actual > expected
+    if operator == "GTE":
+        return actual >= expected
+    if operator == "LT":
+        return actual < expected
+    if operator == "LTE":
+        return actual <= expected
+    if operator == "IN":
+        values = expected if isinstance(expected, list) else [expected]
+        return str(actual).lower() in {str(item).lower() for item in values}
+    if operator == "CONTAINS":
+        return str(expected).lower() in str(actual).lower()
+    return False
+
+
+def evaluate_decision_rules(cursor, organization_id: int, event: dict, result: dict, device_data: dict) -> dict:
+    ensure_decision_rule_tables(cursor)
+    cursor.execute("""
+        SELECT id, name, conditions, action, score_adjustment
+        FROM decision_rules
+        WHERE organization_id = %s AND enabled = TRUE
+        ORDER BY priority ASC, id ASC
+    """, (organization_id,))
+    context = {
+        **event,
+        "risk_score": result["risk_score"],
+        "risk_level": result["risk_level"],
+        "is_new_device": device_data["is_new_device"],
+    }
+    matched = []
+    for rule_id, name, conditions, action, score_adjustment in cursor.fetchall():
+        if all(compare_rule_value(context.get(item["field"]), item["operator"], item.get("value")) for item in (conditions or [])):
+            matched.append({
+                "id": rule_id,
+                "name": name,
+                "action": action,
+                "score_adjustment": int(score_adjustment or 0),
+            })
+    strength = {"ALLOW": 0, "CHALLENGE": 1, "BLOCK": 2}
+    model_action = {
+        "ALLOW": "ALLOW",
+        "VERIFY": "CHALLENGE",
+        "BLOCK": "BLOCK",
+        "LOCK_ACCOUNT": "BLOCK",
+    }.get(result["action"], "CHALLENGE")
+    final_action = model_action
+    for rule in matched:
+        if strength[rule["action"]] > strength[final_action]:
+            final_action = rule["action"]
+    if matched:
+        adjustment = max(rule["score_adjustment"] for rule in matched)
+        result["risk_score"] = min(100, result["risk_score"] + adjustment)
+        result["risk_level"] = (
+            "CRITICAL" if result["risk_score"] >= 90 else
+            "HIGH" if result["risk_score"] >= 70 else
+            "MEDIUM" if result["risk_score"] >= 40 else
+            "LOW"
+        )
+        result["signals"].extend({
+            "category": "RULE",
+            "label": f"Policy matched: {rule['name']}",
+            "points": rule["score_adjustment"],
+            "evidence": f"Organization rule selected {rule['action']}",
+        } for rule in matched)
+        result["reasons"].extend(f"Policy matched: {rule['name']}" for rule in matched)
+        result["reason"] = ", ".join(result["reasons"])
+    if final_action == "BLOCK":
+        result["risk_score"] = max(result["risk_score"], 70)
+    elif final_action == "CHALLENGE":
+        result["risk_score"] = max(result["risk_score"], 40)
+    result["risk_level"] = (
+        "CRITICAL" if result["risk_score"] >= 90 else
+        "HIGH" if result["risk_score"] >= 70 else
+        "MEDIUM" if result["risk_score"] >= 40 else
+        "LOW"
+    )
+    result["action"] = final_action
+    result["recommendation"] = {
+        "ALLOW": "ALLOW",
+        "CHALLENGE": "STEP_UP_VERIFICATION",
+        "BLOCK": "BLOCK_TRANSACTION",
+    }[final_action]
+    result["confidence"] = min(99, max(float(result.get("confidence") or 55), result["risk_score"] + 4))
+    return {
+        "model_action": model_action,
+        "final_action": final_action,
+        "matched_rules": [rule["name"] for rule in matched],
+    }
+
+
+@app.get("/decision-rules", response_model=list[DecisionRuleResponse])
+def list_decision_rules(current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    ensure_decision_rule_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    cursor.execute("""
+        SELECT r.id, r.organization_id, r.name, r.conditions, r.action, r.score_adjustment,
+               r.priority, r.enabled, u.name, r.created_at, r.updated_at
+        FROM decision_rules r
+        LEFT JOIN app_users u ON u.id = r.created_by
+        WHERE r.organization_id = %s
+        ORDER BY r.priority, r.id
+    """, (organization_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [rule_response(row) for row in rows]
+
+
+@app.post("/decision-rules", response_model=DecisionRuleResponse)
+def create_decision_rule(
+    payload: DecisionRuleRequest,
+    current_user: AuthUserResponse = Depends(get_current_user),
+):
+    require_admin(current_user)
+    conn, cursor = get_db()
+    ensure_auth_tables(cursor)
+    ensure_decision_rule_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    try:
+        cursor.execute("""
+            INSERT INTO decision_rules (
+                organization_id, name, conditions, action, score_adjustment,
+                priority, enabled, created_by
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, organization_id, name, conditions, action, score_adjustment,
+                      priority, enabled, %s, created_at, updated_at
+        """, (
+            organization_id,
+            payload.name.strip(),
+            Json([condition.model_dump() for condition in payload.conditions]),
+            payload.action,
+            payload.score_adjustment,
+            payload.priority,
+            payload.enabled,
+            current_user.id,
+            current_user.name,
+        ))
+    except psycopg2.errors.UniqueViolation as exc:
+        conn.rollback()
+        conn.close()
+        raise HTTPException(status_code=409, detail="A rule with this name already exists") from exc
+    row = cursor.fetchone()
+    conn.commit()
+    conn.close()
+    return rule_response(row)
+
+
+@app.patch("/decision-rules/{rule_id}", response_model=DecisionRuleResponse)
+def update_decision_rule(
+    rule_id: int,
+    payload: DecisionRuleRequest,
+    current_user: AuthUserResponse = Depends(get_current_user),
+):
+    require_admin(current_user)
+    conn, cursor = get_db()
+    ensure_decision_rule_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    cursor.execute("""
+        UPDATE decision_rules
+        SET name = %s, conditions = %s, action = %s, score_adjustment = %s,
+            priority = %s, enabled = %s, updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s AND organization_id = %s
+        RETURNING id, organization_id, name, conditions, action, score_adjustment,
+                  priority, enabled, %s, created_at, updated_at
+    """, (
+        payload.name.strip(),
+        Json([condition.model_dump() for condition in payload.conditions]),
+        payload.action,
+        payload.score_adjustment,
+        payload.priority,
+        payload.enabled,
+        rule_id,
+        organization_id,
+        current_user.name,
+    ))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Rule not found")
+    conn.commit()
+    conn.close()
+    return rule_response(row)
+
+
+@app.delete("/decision-rules/{rule_id}")
+def delete_decision_rule(rule_id: int, current_user: AuthUserResponse = Depends(get_current_user)):
+    require_admin(current_user)
+    conn, cursor = get_db()
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    cursor.execute(
+        "DELETE FROM decision_rules WHERE id = %s AND organization_id = %s RETURNING id",
+        (rule_id, organization_id),
+    )
+    deleted = cursor.fetchone()
+    conn.commit()
+    conn.close()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    return {"message": "Rule deleted"}
 
 
 @app.get("/behavior/settings", response_model=BehaviorSettingsResponse)
@@ -1525,7 +1915,7 @@ def register(payload: AuthRegisterRequest):
     ensure_auth_tables(cursor)
     invite_token = payload.invite_token.strip().upper()
     cursor.execute("""
-        SELECT id, email, role, expires_at, used_at
+        SELECT id, email, role, expires_at, used_at, organization_id
         FROM invite_tokens
         WHERE token = %s
     """, (invite_token,))
@@ -1534,7 +1924,7 @@ def register(payload: AuthRegisterRequest):
         conn.close()
         raise HTTPException(status_code=403, detail="A valid invite token is required")
 
-    invite_id, invite_email, invite_role, expires_at, used_at = invite
+    invite_id, invite_email, invite_role, expires_at, used_at, organization_id = invite
     if used_at is not None:
         conn.close()
         raise HTTPException(status_code=403, detail="Invite token has already been used")
@@ -1546,7 +1936,6 @@ def register(payload: AuthRegisterRequest):
         raise HTTPException(status_code=403, detail="Invite token is not valid for this email")
 
     role = invite_role if invite_role in ALLOWED_ROLES else "Read-Only Auditor"
-    organization_id = default_organization_id(cursor)
     cursor.execute("SELECT id FROM app_users WHERE email = %s", (payload.email.lower(),))
     if cursor.fetchone():
         conn.close()
@@ -1673,7 +2062,9 @@ def risk_response_from_row(row) -> RiskScoreResponse:
         behavioral_match=bool(row[10]),
         device_intelligence=row[11],
         account_takeover=row[12],
-        created_at=str(row[13]),
+        action_decision_id=row[13],
+        matched_rules=row[14] or [],
+        created_at=str(row[15]),
     )
 
 
@@ -1699,10 +2090,11 @@ async def score_risk(
     if idempotency_key:
         cursor.execute("""
             SELECT id, transaction_id, user_id, risk_score, risk_level, action, recommendation, confidence,
-                   reasons, signals, behavioral_match, device_intelligence, account_takeover, created_at
+                   reasons, signals, behavioral_match, device_intelligence, account_takeover,
+                   action_decision_id, matched_rules, created_at
             FROM risk_decisions
-            WHERE idempotency_key = %s
-        """, (idempotency_key,))
+            WHERE idempotency_key = %s AND organization_id = %s
+        """, (idempotency_key, organization_id))
         existing = cursor.fetchone()
         if existing:
             conn.close()
@@ -1720,6 +2112,7 @@ async def score_risk(
     behavior["device_intelligence"] = device_data
     behavior["account_takeover"] = takeover_context
     result = analyze_event(event, behavior)
+    action_evaluation = evaluate_decision_rules(cursor, organization_id, event, result, device_data)
     persist_device_intelligence(cursor, organization_id, payload.user_id, event, device_data, result)
     persist_account_security_state(
         cursor,
@@ -1772,11 +2165,12 @@ async def score_risk(
             organization_id, transaction_id, idempotency_key, user_id, risk_score, risk_level,
             action, recommendation, confidence, reasons, signals, behavioral_match,
             request_payload, source, learned, device_intelligence, account_takeover
+            , matched_rules
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id, transaction_id, user_id, risk_score, risk_level, action,
                   recommendation, confidence, reasons, signals, behavioral_match,
-                  device_intelligence, account_takeover, created_at
+                  device_intelligence, account_takeover, action_decision_id, matched_rules, created_at
     """, (
         organization_id,
         transaction_id,
@@ -1795,11 +2189,35 @@ async def score_risk(
         trusted_for_learning,
         Json(device_data),
         Json(result["account_takeover"]),
+        Json(action_evaluation["matched_rules"]),
     ))
     decision_row = cursor.fetchone()
+    cursor.execute("""
+        INSERT INTO action_decisions (
+            organization_id, risk_decision_id, transaction_id, user_id,
+            model_action, final_action, matched_rules, status, reason
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, 'DECIDED', %s)
+        RETURNING id
+    """, (
+        organization_id,
+        decision_row[0],
+        transaction_id,
+        payload.user_id,
+        action_evaluation["model_action"],
+        action_evaluation["final_action"],
+        Json(action_evaluation["matched_rules"]),
+        result["reason"],
+    ))
+    action_decision_id = cursor.fetchone()[0]
+    cursor.execute(
+        "UPDATE risk_decisions SET action_decision_id = %s WHERE id = %s",
+        (action_decision_id, decision_row[0]),
+    )
+    decision_row = (*decision_row[:13], action_decision_id, decision_row[14], decision_row[15])
 
     alert = None
-    if result["risk_score"] >= 40:
+    if result["risk_score"] >= 40 or result["action"] != "ALLOW":
         cursor.execute("""
             INSERT INTO fraud_alerts (
                 organization_id, risk_decision_id, user_id, reason, risk_score, risk_level, timestamp,
@@ -1821,7 +2239,7 @@ async def score_risk(
             result["behavioral_match"],
         ))
         alert_id = cursor.fetchone()[0]
-        materialize_cases_from_alerts(cursor)
+        materialize_cases_from_alerts(cursor, organization_id)
         alert = {
             "id": alert_id,
             "user_id": payload.user_id,
@@ -1846,34 +2264,55 @@ async def score_risk(
     conn.close()
 
     if alert:
-        disconnected = []
-        for websocket in clients:
-            try:
-                await websocket.send_json(alert)
-            except Exception:
-                disconnected.append(websocket)
-        for websocket in disconnected:
-            if websocket in clients:
-                clients.remove(websocket)
+        await broadcast_alert(alert, organization_id)
 
     return risk_response_from_row(decision_row)
 
 
 @app.websocket("/ws/fraud")
 async def ws_fraud(websocket: WebSocket):
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4401)
+        return
+    try:
+        payload = decode_token(token)
+        conn, cursor = get_db()
+        ensure_auth_tables(cursor)
+        cursor.execute("SELECT organization_id FROM app_users WHERE id = %s", (payload["uid"],))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            raise ValueError("user missing")
+        organization_id = row[0]
+    except Exception:
+        await websocket.close(code=4401)
+        return
     await websocket.accept()
-    clients.append(websocket)
+    connection = {"websocket": websocket, "organization_id": organization_id}
+    clients.append(connection)
 
     try:
         while True:
             await asyncio.sleep(1)
-    except:
-        clients.remove(websocket)
+    except Exception:
+        if connection in clients:
+            clients.remove(connection)
 
 @app.post("/internal/fraud")
-async def push_fraud(event: dict):
-    for client in clients:
-        await client.send_json(event)
+async def push_fraud(
+    event: dict,
+    x_internal_secret: str | None = Header(default=None, alias="X-Internal-Secret"),
+):
+    if not x_internal_secret or not hmac.compare_digest(x_internal_secret, AUTH_SECRET):
+        raise HTTPException(status_code=401, detail="Invalid internal service secret")
+    organization_id = event.pop("organization_id", None)
+    if organization_id is None:
+        conn, cursor = get_db()
+        organization_id = default_organization_id(cursor)
+        conn.commit()
+        conn.close()
+    await broadcast_alert(event, int(organization_id))
     return {"status": "sent"}
 
 
@@ -1895,10 +2334,12 @@ async def create_demo_fraud_event(
 
     conn, cursor = get_db()
     prepare_analytics_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
     cursor.execute("""
-        INSERT INTO events (transaction_id, user_id, amount, location, event_type, device_type, network, ip, timestamp)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO events (organization_id, transaction_id, user_id, amount, location, event_type, device_type, network, ip, timestamp)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
+        organization_id,
         f"demo-{secrets.token_hex(4)}",
         payload.user_id,
         payload.amount,
@@ -1911,6 +2352,7 @@ async def create_demo_fraud_event(
     ))
     cursor.execute("""
         INSERT INTO fraud_alerts (
+            organization_id,
             user_id,
             reason,
             risk_score,
@@ -1921,9 +2363,10 @@ async def create_demo_fraud_event(
             signals_triggered,
             behavioral_match
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
     """, (
+        organization_id,
         payload.user_id,
         reason,
         risk_score,
@@ -1935,7 +2378,7 @@ async def create_demo_fraud_event(
         behavioral_match,
     ))
     alert_id = cursor.fetchone()[0]
-    materialize_cases_from_alerts(cursor)
+    materialize_cases_from_alerts(cursor, organization_id)
     conn.commit()
     conn.close()
 
@@ -1953,19 +2396,21 @@ async def create_demo_fraud_event(
     socket_event = alert.model_dump()
     socket_event["id"] = alert_id
     socket_event["created_by"] = current_user.name
-    for client in clients:
-        await client.send_json(socket_event)
+    await broadcast_alert(socket_event, organization_id)
     return alert
 
 
 @app.get("/events", response_model=list[EventResponse])
-def get_events(limit: int = Query(50)):
+def get_events(limit: int = Query(50), current_user: AuthUserResponse = Depends(get_current_user)):
     conn, cursor = get_db()
+    organization_id = current_user.organization_id or default_organization_id(cursor)
 
     cursor.execute("""
         SELECT user_id, event_type, device_type, ip, timestamp
-        FROM events ORDER BY id DESC LIMIT %s
-    """, (limit,))
+        FROM events
+        WHERE organization_id = %s
+        ORDER BY id DESC LIMIT %s
+    """, (organization_id, limit))
 
     rows = cursor.fetchall()
 
@@ -1974,11 +2419,12 @@ def get_events(limit: int = Query(50)):
     return [EventResponse(*row) for row in rows]
 
 @app.get("/fraud-alerts", response_model=list[FraudAlertResponse])
-def get_fraud(limit: int = Query(50)):
+def get_fraud(limit: int = Query(50), current_user: AuthUserResponse = Depends(get_current_user)):
     conn, cursor = get_db()
 
     ensure_fraud_alert_columns(cursor)
     conn.commit()
+    organization_id = current_user.organization_id or default_organization_id(cursor)
 
     cursor.execute("""
         SELECT
@@ -1991,8 +2437,10 @@ def get_fraud(limit: int = Query(50)):
             confidence,
             signals_triggered,
             behavioral_match
-        FROM fraud_alerts ORDER BY id DESC LIMIT %s
-    """, (limit,))
+        FROM fraud_alerts
+        WHERE organization_id = %s
+        ORDER BY id DESC LIMIT %s
+    """, (organization_id, limit))
 
     rows = cursor.fetchall()
 
@@ -2014,20 +2462,21 @@ def get_fraud(limit: int = Query(50)):
     ]
 
 @app.get("/users/{user_id}/activity")
-def get_user_activity(user_id: str):
+def get_user_activity(user_id: str, current_user: AuthUserResponse = Depends(get_current_user)):
     conn, cursor = get_db()
+    organization_id = current_user.organization_id or default_organization_id(cursor)
 
     cursor.execute("""
         SELECT user_id, event_type, device_type, ip, timestamp
-        FROM events WHERE user_id = %s
-    """, (user_id,))
+        FROM events WHERE user_id = %s AND organization_id = %s
+    """, (user_id, organization_id))
 
     events = cursor.fetchall()
 
     cursor.execute("""
         SELECT user_id, reason, timestamp
-        FROM fraud_alerts WHERE user_id = %s
-    """, (user_id,))
+        FROM fraud_alerts WHERE user_id = %s AND organization_id = %s
+    """, (user_id, organization_id))
 
     frauds = cursor.fetchall()
 
@@ -2048,7 +2497,7 @@ def get_user_profile(user_id: str, current_user: AuthUserResponse = Depends(get_
     cursor.execute("""
         SELECT event_type, device_type, ip, location, network, amount, timestamp
         FROM events
-        WHERE user_id = %s AND (organization_id = %s OR organization_id IS NULL)
+        WHERE user_id = %s AND organization_id = %s
         ORDER BY timestamp DESC NULLS LAST, id DESC
         LIMIT 25
     """, (user_id, organization_id))
@@ -2066,7 +2515,7 @@ def get_user_profile(user_id: str, current_user: AuthUserResponse = Depends(get_
             signals_triggered,
             behavioral_match
         FROM fraud_alerts
-        WHERE user_id = %s AND (organization_id = %s OR organization_id IS NULL)
+        WHERE user_id = %s AND organization_id = %s
         ORDER BY timestamp DESC NULLS LAST, id DESC
         LIMIT 20
     """, (user_id, organization_id))
@@ -2239,7 +2688,8 @@ def update_device_trust(
 def get_intelligence_activity(limit: int = Query(30), current_user: AuthUserResponse = Depends(get_current_user)):
     conn, cursor = get_db()
     ensure_case_tables(cursor)
-    materialize_cases_from_alerts(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    materialize_cases_from_alerts(cursor, organization_id)
     conn.commit()
 
     cursor.execute("""
@@ -2257,9 +2707,10 @@ def get_intelligence_activity(limit: int = Query(30), current_user: AuthUserResp
             c.assigned_to
         FROM case_timeline t
         JOIN cases c ON c.id = t.case_id
+        WHERE c.organization_id = %s
         ORDER BY t.created_at DESC, t.id DESC
         LIMIT %s
-    """, (limit,))
+    """, (organization_id, limit))
     rows = cursor.fetchall()
     conn.close()
 
@@ -2291,7 +2742,8 @@ def get_cases(
 ):
     conn, cursor = get_db()
     ensure_case_tables(cursor)
-    materialize_cases_from_alerts(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    materialize_cases_from_alerts(cursor, organization_id)
     conn.commit()
 
     cursor.execute("""
@@ -2308,7 +2760,8 @@ def get_cases(
             created_at,
             updated_at
         FROM cases
-        WHERE (%s IS NULL OR status = %s)
+        WHERE organization_id = %s
+          AND (%s IS NULL OR status = %s)
           AND (%s IS NULL OR priority = %s)
           AND (%s IS NULL OR assigned_to = %s)
           AND (%s IS NULL OR risk_level = %s)
@@ -2321,7 +2774,7 @@ def get_cases(
             END DESC,
             updated_at DESC,
             id DESC
-    """, (status, status, priority, priority, analyst, analyst, risk_level, risk_level))
+    """, (organization_id, status, status, priority, priority, analyst, analyst, risk_level, risk_level))
     rows = cursor.fetchall()
     conn.close()
     return [row_to_case_summary(row) for row in rows]
@@ -2331,7 +2784,8 @@ def get_cases(
 def get_case(case_id: int, current_user: AuthUserResponse = Depends(get_current_user)):
     conn, cursor = get_db()
     ensure_case_tables(cursor)
-    materialize_cases_from_alerts(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    materialize_cases_from_alerts(cursor, organization_id)
     conn.commit()
 
     cursor.execute("""
@@ -2353,8 +2807,8 @@ def get_case(case_id: int, current_user: AuthUserResponse = Depends(get_current_
             potential_loss,
             actual_loss
         FROM cases
-        WHERE id = %s
-    """, (case_id,))
+        WHERE id = %s AND organization_id = %s
+    """, (case_id, organization_id))
     row = cursor.fetchone()
     if not row:
         conn.close()
@@ -2419,11 +2873,12 @@ def update_case(case_id: int, payload: CaseUpdateRequest, current_user: AuthUser
     ensure_case_tables(cursor)
     ensure_fraud_alert_table(cursor)
     ensure_risk_decision_table(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
     cursor.execute("""
         SELECT assigned_to, status, priority, analyst_feedback, decision, potential_loss, actual_loss, fraud_alert_id
         FROM cases
-        WHERE id = %s
-    """, (case_id,))
+        WHERE id = %s AND organization_id = %s
+    """, (case_id, organization_id))
     before = cursor.fetchone()
     if not before:
         conn.close()
@@ -2450,7 +2905,8 @@ def update_case(case_id: int, payload: CaseUpdateRequest, current_user: AuthUser
     if changes.get("status") == "RESOLVED":
         set_clauses.append("resolved_at = CURRENT_TIMESTAMP")
     params.append(case_id)
-    cursor.execute(f"UPDATE cases SET {', '.join(set_clauses)} WHERE id = %s", params)
+    params.append(organization_id)
+    cursor.execute(f"UPDATE cases SET {', '.join(set_clauses)} WHERE id = %s AND organization_id = %s", params)
 
     actor = current_user.name
     labels = {
@@ -2506,7 +2962,8 @@ def add_case_note(case_id: int, payload: CaseNoteRequest, current_user: AuthUser
 
     conn, cursor = get_db()
     ensure_case_tables(cursor)
-    cursor.execute("SELECT id FROM cases WHERE id = %s", (case_id,))
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    cursor.execute("SELECT id FROM cases WHERE id = %s AND organization_id = %s", (case_id, organization_id))
     if not cursor.fetchone():
         conn.close()
         raise HTTPException(status_code=404, detail="Case not found")
@@ -2527,24 +2984,29 @@ def analytics_overview(current_user: AuthUserResponse = Depends(get_current_user
     conn, cursor = get_db()
     prepare_analytics_tables(cursor)
     conn.commit()
+    organization_id = current_user.organization_id or default_organization_id(cursor)
 
-    cursor.execute("SELECT COUNT(*) FROM events")
+    cursor.execute("SELECT COUNT(*) FROM events WHERE organization_id = %s", (organization_id,))
     total_events = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM fraud_alerts")
+    cursor.execute("SELECT COUNT(*) FROM fraud_alerts WHERE organization_id = %s", (organization_id,))
     fraud_alerts = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM cases WHERE analyst_feedback = 'TRUE_FRAUD'")
+    cursor.execute("SELECT COUNT(*) FROM cases WHERE organization_id = %s AND analyst_feedback = 'TRUE_FRAUD'", (organization_id,))
     confirmed = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM cases WHERE analyst_feedback = 'FALSE_POSITIVE'")
+    cursor.execute("SELECT COUNT(*) FROM cases WHERE organization_id = %s AND analyst_feedback = 'FALSE_POSITIVE'", (organization_id,))
     false_positive = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM cases WHERE status = 'RESOLVED'")
+    cursor.execute("SELECT COUNT(*) FROM cases WHERE organization_id = %s AND status = 'RESOLVED'", (organization_id,))
     resolved = cursor.fetchone()[0]
     cursor.execute("""
         SELECT AVG(EXTRACT(EPOCH FROM (COALESCE(resolved_at, updated_at) - created_at)) / 60)
         FROM cases
-        WHERE status IN ('RESOLVED', 'ARCHIVED')
-    """)
+        WHERE organization_id = %s AND status IN ('RESOLVED', 'ARCHIVED')
+    """, (organization_id,))
     avg_minutes = cursor.fetchone()[0] or 0
-    cursor.execute("SELECT COUNT(*) FROM cases WHERE decision IN ('BLOCK', 'FREEZE', 'ESCALATE') OR COALESCE(actual_loss, 0) = 0")
+    cursor.execute("""
+        SELECT COUNT(*) FROM cases
+        WHERE organization_id = %s
+          AND (decision IN ('BLOCK', 'FREEZE', 'ESCALATE') OR COALESCE(actual_loss, 0) = 0)
+    """, (organization_id,))
     prevented = cursor.fetchone()[0]
     conn.close()
 
@@ -2566,13 +3028,15 @@ def analytics_trends(current_user: AuthUserResponse = Depends(get_current_user))
     conn, cursor = get_db()
     prepare_analytics_tables(cursor)
     conn.commit()
+    organization_id = current_user.organization_id or default_organization_id(cursor)
     cursor.execute("""
         SELECT COALESCE(DATE(timestamp)::TEXT, 'Unknown') AS day, COUNT(*)
         FROM fraud_alerts
+        WHERE organization_id = %s
         GROUP BY day
         ORDER BY day
         LIMIT 30
-    """)
+    """, (organization_id,))
     rows = cursor.fetchall()
     conn.close()
     return [TrendPointResponse(label=r[0], value=r[1]) for r in rows]
@@ -2583,11 +3047,13 @@ def analytics_risk_distribution(current_user: AuthUserResponse = Depends(get_cur
     conn, cursor = get_db()
     prepare_analytics_tables(cursor)
     conn.commit()
+    organization_id = current_user.organization_id or default_organization_id(cursor)
     cursor.execute("""
         SELECT risk_level, COUNT(*)
         FROM fraud_alerts
+        WHERE organization_id = %s
         GROUP BY risk_level
-    """)
+    """, (organization_id,))
     rows = cursor.fetchall()
     conn.close()
     counts = {r[0] or "LOW": r[1] for r in rows}
@@ -2599,6 +3065,7 @@ def analytics_analyst_performance(current_user: AuthUserResponse = Depends(get_c
     conn, cursor = get_db()
     prepare_analytics_tables(cursor)
     conn.commit()
+    organization_id = current_user.organization_id or default_organization_id(cursor)
     cursor.execute("""
         SELECT
             COALESCE(assigned_to, 'Unassigned') AS analyst,
@@ -2607,10 +3074,11 @@ def analytics_analyst_performance(current_user: AuthUserResponse = Depends(get_c
             COUNT(*) FILTER (WHERE analyst_feedback = 'TRUE_FRAUD') AS confirmed_fraud,
             COUNT(*) FILTER (WHERE analyst_feedback = 'FALSE_POSITIVE') AS false_positives
         FROM cases
+        WHERE organization_id = %s
         GROUP BY analyst
         ORDER BY assigned_cases DESC
         LIMIT 12
-    """)
+    """, (organization_id,))
     rows = cursor.fetchall()
     conn.close()
     return [
@@ -2630,6 +3098,7 @@ def analytics_heat_map(current_user: AuthUserResponse = Depends(get_current_user
     conn, cursor = get_db()
     prepare_analytics_tables(cursor)
     conn.commit()
+    organization_id = current_user.organization_id or default_organization_id(cursor)
     cursor.execute("""
         SELECT
             COALESCE(NULLIF(e.location, ''), 'Unknown') AS location,
@@ -2637,11 +3106,12 @@ def analytics_heat_map(current_user: AuthUserResponse = Depends(get_current_user
             COALESCE(AVG(f.risk_score), 0) AS average_risk,
             COALESCE(MAX(f.risk_level), 'LOW') AS highest_risk
         FROM fraud_alerts f
-        LEFT JOIN events e ON e.user_id = f.user_id
+        LEFT JOIN events e ON e.user_id = f.user_id AND e.organization_id = f.organization_id
+        WHERE f.organization_id = %s
         GROUP BY location
         ORDER BY alerts DESC, average_risk DESC
         LIMIT 16
-    """)
+    """, (organization_id,))
     rows = cursor.fetchall()
     conn.close()
     return [
@@ -2655,11 +3125,13 @@ def export_fraud_alerts(current_user: AuthUserResponse = Depends(get_current_use
     conn, cursor = get_db()
     prepare_analytics_tables(cursor)
     conn.commit()
+    organization_id = current_user.organization_id or default_organization_id(cursor)
     cursor.execute("""
         SELECT user_id, risk_score, risk_level, recommended_action, confidence, timestamp
         FROM fraud_alerts
+        WHERE organization_id = %s
         ORDER BY timestamp DESC NULLS LAST, id DESC
-    """)
+    """, (organization_id,))
     rows = cursor.fetchall()
     conn.close()
     return csv_response("fraud-alerts.csv", ["user_id", "risk_score", "risk_level", "action", "confidence", "time"], rows)
@@ -2670,11 +3142,13 @@ def export_cases(current_user: AuthUserResponse = Depends(get_current_user)):
     conn, cursor = get_db()
     prepare_analytics_tables(cursor)
     conn.commit()
+    organization_id = current_user.organization_id or default_organization_id(cursor)
     cursor.execute("""
         SELECT case_number, user_id, risk_score, risk_level, status, priority, assigned_to, analyst_feedback, decision, potential_loss, actual_loss, created_at, updated_at
         FROM cases
+        WHERE organization_id = %s
         ORDER BY updated_at DESC, id DESC
-    """)
+    """, (organization_id,))
     rows = cursor.fetchall()
     conn.close()
     return csv_response(
@@ -2689,6 +3163,7 @@ def export_monthly_report(current_user: AuthUserResponse = Depends(get_current_u
     conn, cursor = get_db()
     prepare_analytics_tables(cursor)
     conn.commit()
+    organization_id = current_user.organization_id or default_organization_id(cursor)
     cursor.execute("""
         SELECT
             COALESCE(DATE_TRUNC('month', created_at)::DATE::TEXT, 'Unknown') AS month,
@@ -2697,9 +3172,10 @@ def export_monthly_report(current_user: AuthUserResponse = Depends(get_current_u
             COUNT(*) FILTER (WHERE analyst_feedback = 'FALSE_POSITIVE') AS false_positives,
             COUNT(*) FILTER (WHERE status IN ('RESOLVED', 'ARCHIVED')) AS resolved
         FROM cases
+        WHERE organization_id = %s
         GROUP BY month
         ORDER BY month DESC
-    """)
+    """, (organization_id,))
     rows = cursor.fetchall()
     conn.close()
     return csv_response("monthly-report.csv", ["month", "cases", "confirmed_fraud", "false_positives", "resolved"], rows)

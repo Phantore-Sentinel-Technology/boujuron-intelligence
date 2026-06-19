@@ -10,10 +10,13 @@ import type {
   CaseSummary,
   CaseUpdate,
   ClientApiKey,
+  DecisionRule,
   FraudAlert,
   FraudHeatMapPoint,
   IntelligenceActivity,
   InviteToken,
+  Organization,
+  RuleCondition,
   RiskDistributionPoint,
   TrendPoint,
   UserRiskProfile,
@@ -71,6 +74,42 @@ export async function createClientApiKey(name: string) {
 export async function getClientApiKeys() {
   const response = await api.get<ClientApiKey[]>("/api-keys");
   return response.data;
+}
+
+export async function getCurrentOrganization() {
+  const response = await api.get<Organization>("/organizations/current");
+  return response.data;
+}
+
+export async function createOrganization(name: string, adminEmail: string) {
+  const response = await api.post<Organization>("/organizations", { name, admin_email: adminEmail });
+  return response.data;
+}
+
+export async function getDecisionRules() {
+  const response = await api.get<DecisionRule[]>("/decision-rules");
+  return response.data;
+}
+
+export async function createDecisionRule(payload: {
+  name: string;
+  conditions: RuleCondition[];
+  action: DecisionRule["action"];
+  score_adjustment: number;
+  priority: number;
+  enabled: boolean;
+}) {
+  const response = await api.post<DecisionRule>("/decision-rules", payload);
+  return response.data;
+}
+
+export async function updateDecisionRule(ruleId: number, payload: Omit<DecisionRule, "id" | "organization_id" | "created_by" | "created_at" | "updated_at">) {
+  const response = await api.patch<DecisionRule>(`/decision-rules/${ruleId}`, payload);
+  return response.data;
+}
+
+export async function deleteDecisionRule(ruleId: number) {
+  await api.delete(`/decision-rules/${ruleId}`);
 }
 
 export async function revokeClientApiKey(keyId: number) {
@@ -189,8 +228,10 @@ export async function downloadExport(path: string, filename: string) {
 }
 
 export function getFraudSocketUrl() {
-  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
-
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${protocol}://${window.location.host}/ws/fraud`;
+  const token = localStorage.getItem(authStorageKey);
+  const configured = import.meta.env.VITE_WS_URL;
+  const base = configured || `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws/fraud`;
+  if (!token) return base;
+  const separator = base.includes("?") ? "&" : "?";
+  return `${base}${separator}token=${encodeURIComponent(token)}`;
 }
