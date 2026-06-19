@@ -253,25 +253,68 @@ uvicorn main:app --reload
 
 ---
 
-# API Example
+# Fraud Intelligence API
 
-Send event:
+Admins create client API keys from **Settings → Fraud Intelligence API Keys**.
+The full secret is shown only once.
 
+```http
+POST /risk-score
+X-API-Key: bj_live_your_secret_key
+Idempotency-Key: transaction-123
+Content-Type: application/json
 ```
-POST /events
-```
 
-Request body:
+Request:
 
-```
+```json
 {
   "user_id": "123",
-  "event_type": "login",
-  "device": "mobile",
-  "ip": "192.168.1.1",
-  "timestamp": "2026-03-13T10:30:00Z"
+  "transaction_id": "txn-123",
+  "amount": 500000,
+  "device": "android",
+  "device_id": "device-a19",
+  "ip": "102.88.45.21",
+  "location": "nigeria",
+  "network": "VPN",
+  "event_type": "transaction",
+  "timestamp": "2026-06-19T10:30:00Z",
+  "is_rooted": false,
+  "is_emulator": false
 }
 ```
+
+Response:
+
+```json
+{
+  "decision_id": 42,
+  "user_id": "123",
+  "transaction_id": "txn-123",
+  "risk_score": 80,
+  "risk_level": "HIGH",
+  "action": "BLOCK",
+  "recommendation": "BLOCK_AND_REVIEW",
+  "confidence": 84,
+  "reasons": [
+    "Large transaction",
+    "VPN usage detected",
+    "New device"
+  ],
+  "signals": [
+    {
+      "category": "TRANSACTION",
+      "label": "Large transaction",
+      "points": 30,
+      "evidence": "Amount 500000.00 is at least 500,000"
+    }
+  ],
+  "behavioral_match": false,
+  "created_at": "2026-06-19 10:30:01"
+}
+```
+
+Every request is stored as a risk decision. Medium, high, and critical decisions also create dashboard alerts and investigation cases.
 
 ---
 

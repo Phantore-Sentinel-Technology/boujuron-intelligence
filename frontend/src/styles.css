@@ -1347,7 +1347,7 @@ dd {
 }
 
 .case-tools select, .filter-select select, .case-control-panel select,
-.case-control-panel input, .note-form textarea, .invite-form input, .invite-form select {
+.case-control-panel input, .note-form textarea, .invite-form input, .invite-form select, .api-key-form input {
   border: 1px solid #334155;
   border-radius: 8px;
   background: #0f172a;
@@ -1580,6 +1580,7 @@ dd {
 }
 
 .invite-form label span,
+.api-key-form label span,
 .invite-result span,
 .invite-row span {
   color: #94a3b8;
@@ -1647,6 +1648,23 @@ dd {
 
 .invite-status.used {
   color: #94a3b8;
+}
+
+.api-key-form {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.api-key-form label {
+  display: grid;
+  gap: 7px;
+}
+
+.api-key-result strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
 }
 
 :root[data-theme="light"] {
@@ -1762,7 +1780,8 @@ dd {
 :root[data-theme="light"] .case-control-panel input,
 :root[data-theme="light"] .note-form textarea,
 :root[data-theme="light"] .invite-form input,
-:root[data-theme="light"] .invite-form select {
+:root[data-theme="light"] .invite-form select,
+:root[data-theme="light"] .api-key-form input {
   background: #ffffff;
   border-color: #cbd5e1;
   color: #0f172a;
@@ -1793,6 +1812,7 @@ dd {
 :root[data-theme="light"] .recommended-box span,
 :root[data-theme="light"] .note-item time,
 :root[data-theme="light"] .invite-form label span,
+:root[data-theme="light"] .api-key-form label span,
 :root[data-theme="light"] .invite-result span,
 :root[data-theme="light"] .invite-row span,
 :root[data-theme="light"] .auth-note {
@@ -2133,6 +2153,7 @@ dd {
   .workflow-strip,
   .case-form-grid,
   .invite-form,
+  .api-key-form,
   .invite-row,
   .invite-result {
     grid-template-columns: 1fr;

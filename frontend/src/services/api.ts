@@ -7,6 +7,7 @@ import type {
   CaseDetail,
   CaseSummary,
   CaseUpdate,
+  ClientApiKey,
   FraudAlert,
   FraudHeatMapPoint,
   IntelligenceActivity,
@@ -58,6 +59,20 @@ export async function createInvite(email: string, role: UserRole, expiresInHours
 export async function getInvites() {
   const response = await api.get<InviteToken[]>("/auth/invites");
   return response.data;
+}
+
+export async function createClientApiKey(name: string) {
+  const response = await api.post<ClientApiKey>("/api-keys", { name });
+  return response.data;
+}
+
+export async function getClientApiKeys() {
+  const response = await api.get<ClientApiKey[]>("/api-keys");
+  return response.data;
+}
+
+export async function revokeClientApiKey(keyId: number) {
+  await api.delete(`/api-keys/${keyId}`);
 }
 
 export async function forgotPassword(email: string) {

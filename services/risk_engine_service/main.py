@@ -1,5 +1,5 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List
 from datetime import datetime
 
@@ -19,10 +19,21 @@ connections: List[WebSocket] = []
 # =========================
 class Event(BaseModel):
     user_id: str
-    event_type: str
-    device_type: str
-    ip: str
-    timestamp: str
+    amount: float = Field(default=0, ge=0)
+    device: str | None = None
+    device_type: str | None = None
+    device_id: str | None = None
+    ip: str = Field(min_length=1, max_length=160)
+    location: str = ""
+    network: str = ""
+    event_type: str = "transaction"
+    timestamp: str | None = None
+    is_rooted: bool = False
+    is_emulator: bool = False
+    browser_tampering: bool = False
+    sim_swap_detected: bool = False
+    password_changed_recently: bool = False
+    failed_login_count: int = Field(default=0, ge=0)
 
 
 # =========================
@@ -38,15 +49,20 @@ def home():
 # =========================
 @app.post("/risk-score")
 async def risk_score(event: Event):
-
-    result = analyze_event(event.model_dump())
+    event_data = event.model_dump()
+    event_data["timestamp"] = event.timestamp or datetime.utcnow().isoformat()
+    result = analyze_event(event_data)
 
     alert = {
         "user_id": event.user_id,
         "reason": result["reason"],
         "risk_score": result["risk_score"],
         "risk_level": result["risk_level"],
-        "timestamp": event.timestamp
+        "timestamp": event_data["timestamp"],
+        "recommended_action": result["recommendation"],
+        "confidence": result["confidence"],
+        "signals_triggered": len(result["signals"]),
+        "behavioral_match": result["behavioral_match"],
     }
 
     fraud_alerts.insert(0, alert)
@@ -62,7 +78,18 @@ async def risk_score(event: Event):
     for dc in disconnected:
         connections.remove(dc)
 
-    return result
+    return {
+        "user_id": event.user_id,
+        "risk_score": result["risk_score"],
+        "risk_level": result["risk_level"],
+        "action": result["action"],
+        "recommendation": result["recommendation"],
+        "confidence": result["confidence"],
+        "reasons": result["reasons"],
+        "signals": result["signals"],
+        "behavioral_match": result["behavioral_match"],
+        "timestamp": event_data["timestamp"],
+    }
 
 # =========================
 # GET ALERTS

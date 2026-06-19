@@ -1,4 +1,7 @@
-from pydantic import BaseModel
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
 
 UserRole = str
 
@@ -59,6 +62,73 @@ class InviteResponse(BaseModel):
     expires_at: str
     used_at: str | None = None
     created_by: str | None = None
+    created_at: str
+
+
+class ApiKeyCreateRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+
+
+class ApiKeyResponse(BaseModel):
+    id: int
+    name: str
+    key_prefix: str
+    api_key: str | None = None
+    active: bool
+    last_used_at: str | None = None
+    created_at: str
+
+
+class RiskScoreRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=160)
+    amount: float = Field(default=0, ge=0)
+    device: str | None = None
+    device_type: str | None = None
+    device_id: str | None = None
+    ip: str = Field(min_length=1, max_length=160)
+    location: str = ""
+    network: str = ""
+    event_type: str = "transaction"
+    transaction_id: str | None = None
+    timestamp: str | None = None
+    is_rooted: bool = False
+    is_emulator: bool = False
+    browser_tampering: bool = False
+    sim_swap_detected: bool = False
+    password_changed_recently: bool = False
+    failed_login_count: int = Field(default=0, ge=0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp(cls, value):
+        if value:
+            try:
+                datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("timestamp must be ISO 8601") from exc
+        return value
+
+
+class RiskSignalResponse(BaseModel):
+    category: str
+    label: str
+    points: int
+    evidence: str
+
+
+class RiskScoreResponse(BaseModel):
+    decision_id: int
+    user_id: str
+    transaction_id: str
+    risk_score: int
+    risk_level: str
+    action: str
+    recommendation: str
+    confidence: float
+    reasons: list[str]
+    signals: list[RiskSignalResponse]
+    behavioral_match: bool
     created_at: str
 
 

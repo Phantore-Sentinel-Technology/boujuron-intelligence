@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from statistics import mean
 
 import psycopg2
+from psycopg2.extras import Json
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response
@@ -24,6 +25,8 @@ from services.dashboard_service.schemas import (
     AuthRegisterRequest,
     AuthTokenResponse,
     AuthUserResponse,
+    ApiKeyCreateRequest,
+    ApiKeyResponse,
     AnalystPerformanceResponse,
     AnalyticsOverviewResponse,
     CaseDetailResponse,
@@ -46,6 +49,8 @@ from services.dashboard_service.schemas import (
     NotificationResponse,
     RiskTimelinePoint,
     RiskDistributionResponse,
+    RiskScoreRequest,
+    RiskScoreResponse,
     ResetPasswordRequest,
     ScoreBreakdownItem,
     TrendPointResponse,
@@ -134,6 +139,18 @@ def ensure_auth_tables(cursor):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS client_api_keys (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            key_prefix TEXT NOT NULL,
+            key_hash TEXT UNIQUE NOT NULL,
+            active BOOLEAN DEFAULT TRUE,
+            last_used_at TIMESTAMP,
+            created_by INTEGER REFERENCES app_users(id) ON DELETE SET NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
 
 def ensure_event_table(cursor):
@@ -156,11 +173,40 @@ def ensure_event_table(cursor):
         ("amount", "NUMERIC"),
         ("location", "TEXT"),
         ("network", "TEXT"),
+        ("device_id", "TEXT"),
+        ("metadata", "JSONB"),
+        ("source", "TEXT"),
     ):
         cursor.execute(f"""
             ALTER TABLE events
             ADD COLUMN IF NOT EXISTS {column_name} {column_type}
         """)
+
+
+def ensure_risk_decision_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS risk_decisions (
+            id SERIAL PRIMARY KEY,
+            transaction_id TEXT NOT NULL,
+            idempotency_key TEXT UNIQUE,
+            user_id TEXT NOT NULL,
+            risk_score INTEGER NOT NULL,
+            risk_level TEXT NOT NULL,
+            action TEXT NOT NULL,
+            recommendation TEXT NOT NULL,
+            confidence NUMERIC,
+            reasons JSONB DEFAULT '[]'::jsonb,
+            signals JSONB DEFAULT '[]'::jsonb,
+            behavioral_match BOOLEAN,
+            request_payload JSONB DEFAULT '{}'::jsonb,
+            source TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        ALTER TABLE risk_decisions
+        ADD COLUMN IF NOT EXISTS recommendation TEXT
+    """)
 
 
 def ensure_fraud_alert_table(cursor):
@@ -239,6 +285,7 @@ def prepare_analytics_tables(cursor):
     ensure_event_table(cursor)
     ensure_fraud_alert_table(cursor)
     ensure_case_tables(cursor)
+    ensure_risk_decision_table(cursor)
     materialize_cases_from_alerts(cursor)
 
 
@@ -456,6 +503,78 @@ def require_admin(current_user: AuthUserResponse):
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
+def hash_api_key(api_key: str) -> str:
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+
+
+def authenticate_risk_client(
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+):
+    if x_api_key:
+        conn, cursor = get_db()
+        ensure_auth_tables(cursor)
+        cursor.execute("""
+            SELECT id, name, key_prefix
+            FROM client_api_keys
+            WHERE key_hash = %s AND active = TRUE
+        """, (hash_api_key(x_api_key.strip()),))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            raise HTTPException(status_code=401, detail="Invalid API key")
+        cursor.execute("UPDATE client_api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE id = %s", (row[0],))
+        conn.commit()
+        conn.close()
+        return {"type": "api_key", "id": row[0], "name": row[1], "prefix": row[2]}
+
+    user = get_current_user(authorization)
+    return {"type": "user", "id": user.id, "name": user.name, "role": user.role}
+
+
+def api_key_response(row, api_key: str | None = None) -> ApiKeyResponse:
+    key_id, name, key_prefix, active, last_used_at, created_at = row
+    return ApiKeyResponse(
+        id=key_id,
+        name=name,
+        key_prefix=key_prefix,
+        api_key=api_key,
+        active=active,
+        last_used_at=str(last_used_at) if last_used_at else None,
+        created_at=str(created_at),
+    )
+
+
+def behavioral_context(cursor, user_id: str) -> dict:
+    ensure_event_table(cursor)
+    cursor.execute("""
+        SELECT
+            COALESCE(AVG(amount), 0),
+            COALESCE(ARRAY_AGG(DISTINCT LOWER(NULLIF(device_id, ''))) FILTER (WHERE device_id IS NOT NULL AND device_id <> ''), '{}'),
+            COALESCE(ARRAY_AGG(DISTINCT LOWER(NULLIF(device_type, ''))) FILTER (WHERE device_type IS NOT NULL AND device_type <> ''), '{}'),
+            COALESCE(ARRAY_AGG(DISTINCT LOWER(NULLIF(location, ''))) FILTER (WHERE location IS NOT NULL AND location <> ''), '{}'),
+            MIN(EXTRACT(HOUR FROM timestamp)),
+            MAX(EXTRACT(HOUR FROM timestamp))
+        FROM (
+            SELECT amount, device_id, device_type, location, timestamp
+            FROM events
+            WHERE user_id = %s
+            ORDER BY timestamp DESC NULLS LAST, id DESC
+            LIMIT 100
+        ) history
+    """, (user_id,))
+    row = cursor.fetchone()
+    device_ids = list(row[1] or [])
+    device_types = list(row[2] or [])
+    return {
+        "average_amount": float(row[0] or 0),
+        "known_devices": list(dict.fromkeys(device_ids + device_types)),
+        "known_locations": list(row[3] or []),
+        "usual_hour_start": int(row[4]) if row[4] is not None else None,
+        "usual_hour_end": int(row[5]) if row[5] is not None else None,
+    }
+
+
 def parse_reasons(reason: str | None) -> list[str]:
     return [item.strip() for item in (reason or "").split(",") if item.strip()]
 
@@ -634,6 +753,54 @@ def list_invites(current_user: AuthUserResponse = Depends(get_current_user)):
     return [invite_response(row) for row in rows]
 
 
+@app.post("/api-keys", response_model=ApiKeyResponse)
+def create_api_key(payload: ApiKeyCreateRequest, current_user: AuthUserResponse = Depends(get_current_user)):
+    require_admin(current_user)
+    raw_key = f"bj_live_{secrets.token_urlsafe(32)}"
+    prefix = raw_key[:16]
+    conn, cursor = get_db()
+    ensure_auth_tables(cursor)
+    cursor.execute("""
+        INSERT INTO client_api_keys (name, key_prefix, key_hash, created_by)
+        VALUES (%s, %s, %s, %s)
+        RETURNING id, name, key_prefix, active, last_used_at, created_at
+    """, (payload.name.strip(), prefix, hash_api_key(raw_key), current_user.id))
+    row = cursor.fetchone()
+    conn.commit()
+    conn.close()
+    return api_key_response(row, api_key=raw_key)
+
+
+@app.get("/api-keys", response_model=list[ApiKeyResponse])
+def list_api_keys(current_user: AuthUserResponse = Depends(get_current_user)):
+    require_admin(current_user)
+    conn, cursor = get_db()
+    ensure_auth_tables(cursor)
+    cursor.execute("""
+        SELECT id, name, key_prefix, active, last_used_at, created_at
+        FROM client_api_keys
+        ORDER BY created_at DESC
+        LIMIT 100
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [api_key_response(row) for row in rows]
+
+
+@app.delete("/api-keys/{key_id}")
+def revoke_api_key(key_id: int, current_user: AuthUserResponse = Depends(get_current_user)):
+    require_admin(current_user)
+    conn, cursor = get_db()
+    ensure_auth_tables(cursor)
+    cursor.execute("UPDATE client_api_keys SET active = FALSE WHERE id = %s RETURNING id", (key_id,))
+    revoked = cursor.fetchone()
+    conn.commit()
+    conn.close()
+    if not revoked:
+        raise HTTPException(status_code=404, detail="API key not found")
+    return {"message": "API key revoked"}
+
+
 @app.post("/auth/register", response_model=AuthTokenResponse)
 def register(payload: AuthRegisterRequest):
     if len(payload.password) < 8:
@@ -773,6 +940,164 @@ def serve_dashboard():
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "boujuron-dashboard-api"}
+
+
+def risk_response_from_row(row) -> RiskScoreResponse:
+    return RiskScoreResponse(
+        decision_id=row[0],
+        transaction_id=row[1],
+        user_id=row[2],
+        risk_score=row[3],
+        risk_level=row[4],
+        action=row[5],
+        recommendation=row[6] or row[5],
+        confidence=float(row[7] or 0),
+        reasons=row[8] or [],
+        signals=row[9] or [],
+        behavioral_match=bool(row[10]),
+        created_at=str(row[11]),
+    )
+
+
+@app.post("/risk-score", response_model=RiskScoreResponse)
+async def score_risk(
+    payload: RiskScoreRequest,
+    client=Depends(authenticate_risk_client),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
+    if idempotency_key and len(idempotency_key) > 160:
+        raise HTTPException(status_code=400, detail="Idempotency-Key must be 160 characters or fewer")
+
+    event = payload.model_dump()
+    event["device_type"] = payload.device_type or payload.device or ""
+    event["timestamp"] = payload.timestamp or datetime.utcnow().isoformat()
+    transaction_id = payload.transaction_id or f"txn_{secrets.token_hex(10)}"
+    source = f"{client['type']}:{client['name']}"
+
+    conn, cursor = get_db()
+    prepare_analytics_tables(cursor)
+
+    if idempotency_key:
+        cursor.execute("""
+            SELECT id, transaction_id, user_id, risk_score, risk_level, action, recommendation, confidence,
+                   reasons, signals, behavioral_match, created_at
+            FROM risk_decisions
+            WHERE idempotency_key = %s
+        """, (idempotency_key,))
+        existing = cursor.fetchone()
+        if existing:
+            conn.close()
+            return risk_response_from_row(existing)
+
+    behavior = behavioral_context(cursor, payload.user_id)
+    result = analyze_event(event, behavior)
+    metadata = {
+        **payload.metadata,
+        "is_rooted": payload.is_rooted,
+        "is_emulator": payload.is_emulator,
+        "browser_tampering": payload.browser_tampering,
+        "sim_swap_detected": payload.sim_swap_detected,
+        "password_changed_recently": payload.password_changed_recently,
+        "failed_login_count": payload.failed_login_count,
+    }
+
+    cursor.execute("""
+        INSERT INTO events (
+            transaction_id, user_id, amount, location, event_type, device_type,
+            device_id, network, ip, timestamp, metadata, source
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, (
+        transaction_id,
+        payload.user_id,
+        payload.amount,
+        payload.location,
+        payload.event_type,
+        event["device_type"],
+        payload.device_id,
+        payload.network,
+        payload.ip,
+        event["timestamp"],
+        Json(metadata),
+        source,
+    ))
+
+    cursor.execute("""
+        INSERT INTO risk_decisions (
+            transaction_id, idempotency_key, user_id, risk_score, risk_level,
+            action, recommendation, confidence, reasons, signals, behavioral_match, request_payload, source
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id, transaction_id, user_id, risk_score, risk_level, action,
+                  recommendation, confidence, reasons, signals, behavioral_match, created_at
+    """, (
+        transaction_id,
+        idempotency_key,
+        payload.user_id,
+        result["risk_score"],
+        result["risk_level"],
+        result["action"],
+        result["recommendation"],
+        result["confidence"],
+        Json(result["reasons"]),
+        Json(result["signals"]),
+        result["behavioral_match"],
+        Json(event),
+        source,
+    ))
+    decision_row = cursor.fetchone()
+
+    alert = None
+    if result["risk_score"] >= 40:
+        cursor.execute("""
+            INSERT INTO fraud_alerts (
+                user_id, reason, risk_score, risk_level, timestamp,
+                recommended_action, confidence, signals_triggered, behavioral_match
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            payload.user_id,
+            result["reason"],
+            result["risk_score"],
+            result["risk_level"],
+            event["timestamp"],
+            result["recommendation"],
+            result["confidence"],
+            len(result["signals"]),
+            result["behavioral_match"],
+        ))
+        alert_id = cursor.fetchone()[0]
+        materialize_cases_from_alerts(cursor)
+        alert = {
+            "id": alert_id,
+            "user_id": payload.user_id,
+            "reason": result["reason"],
+            "risk_score": str(result["risk_score"]),
+            "risk_level": result["risk_level"],
+            "timestamp": event["timestamp"],
+            "recommended_action": result["action"],
+            "confidence": float(result["confidence"]),
+            "signals_triggered": len(result["signals"]),
+            "behavioral_match": result["behavioral_match"],
+        }
+
+    conn.commit()
+    conn.close()
+
+    if alert:
+        disconnected = []
+        for websocket in clients:
+            try:
+                await websocket.send_json(alert)
+            except Exception:
+                disconnected.append(websocket)
+        for websocket in disconnected:
+            if websocket in clients:
+                clients.remove(websocket)
+
+    return risk_response_from_row(decision_row)
+
 
 @app.websocket("/ws/fraud")
 async def ws_fraud(websocket: WebSocket):
