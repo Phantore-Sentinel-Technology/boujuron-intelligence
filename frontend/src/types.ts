@@ -118,6 +118,35 @@ export interface UserRiskProfile {
   recent_events: UserProfileEvent[];
   previous_investigations: FraudAlert[];
   score_breakdown: ScoreBreakdownItem[];
+  device_inventory: DeviceProfile[];
+  account_security?: AccountSecurity | null;
+}
+
+export interface DeviceProfile {
+  fingerprint: string;
+  label: string;
+  status: "NEW" | "TRUSTED" | "SUSPICIOUS" | "BLOCKED";
+  trust_score: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  event_count: number;
+  last_ip?: string | null;
+  last_location?: string | null;
+  integrity_flags: string[];
+}
+
+export interface AccountSecurity {
+  takeover_risk: number;
+  takeover_level: RiskLevel;
+  recommendation: string;
+  recent_failed_logins: number;
+  password_changed_at?: string | null;
+  sim_changed_at?: string | null;
+  last_successful_login_at?: string | null;
+  last_login_location?: string | null;
+  last_login_ip?: string | null;
+  last_login_device?: string | null;
+  indicators: string[];
 }
 
 export interface RiskTimelinePoint {

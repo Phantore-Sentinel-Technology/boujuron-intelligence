@@ -931,6 +931,150 @@ dd {
   font-size: 12px;
 }
 
+.device-inventory {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.device-record {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #334155;
+  border-left: 3px solid #64748b;
+  border-radius: 8px;
+  background: #0f172a;
+}
+
+.device-record.trusted { border-left-color: #22c55e; }
+.device-record.suspicious { border-left-color: #f59e0b; }
+.device-record.blocked { border-left-color: #ef4444; }
+
+.device-record-heading,
+.device-actions,
+.ato-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.device-record-heading div {
+  min-width: 0;
+}
+
+.device-record-heading strong,
+.device-record-heading span {
+  display: block;
+}
+
+.device-record-heading div span {
+  margin-top: 4px;
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.device-status,
+.integrity-flags span {
+  border: 1px solid #475569;
+  border-radius: 999px;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.device-status.trusted { color: #86efac; border-color: rgba(34, 197, 94, 0.45); }
+.device-status.suspicious { color: #fde68a; border-color: rgba(245, 158, 11, 0.45); }
+.device-status.blocked { color: #fecaca; border-color: rgba(239, 68, 68, 0.48); }
+
+.device-record-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.device-record-facts span {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.device-record-facts strong {
+  display: block;
+  margin-top: 3px;
+  color: #e2e8f0;
+  overflow-wrap: anywhere;
+}
+
+.integrity-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: #fecaca;
+}
+
+.secondary-button,
+.danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  background: #1e293b;
+  color: #e2e8f0;
+  padding: 9px 11px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.danger-button {
+  border-color: rgba(239, 68, 68, 0.48);
+  color: #fecaca;
+}
+
+.secondary-button:disabled,
+.danger-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.ato-summary {
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+}
+
+.ato-summary div span,
+.ato-summary div strong {
+  display: block;
+}
+
+.ato-summary div span {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.ato-summary div strong {
+  margin-top: 2px;
+  font-size: 32px;
+}
+
+.ato-summary p {
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.security-indicators {
+  margin-top: 12px;
+}
+
 .anomaly-list, .notification-list, .investigation-feed, .history-list {
   display: grid;
   gap: 10px;
@@ -1800,12 +1944,21 @@ dd {
 :root[data-theme="light"] .breakdown-item,
 :root[data-theme="light"] .chip-list span,
 :root[data-theme="light"] .trend,
+:root[data-theme="light"] .device-record,
+:root[data-theme="light"] .ato-summary,
+:root[data-theme="light"] .secondary-button,
+:root[data-theme="light"] .danger-button,
 :root[data-theme="light"] .invite-result,
 :root[data-theme="light"] .invite-row,
 :root[data-theme="light"] .evaluation-grid div {
   background: #f8fafc;
   border-color: #cbd5e1;
   color: #0f172a;
+}
+
+:root[data-theme="light"] .device-record-facts strong,
+:root[data-theme="light"] .ato-summary p {
+  color: #334155;
 }
 
 :root[data-theme="light"] .case-command,
@@ -2159,6 +2312,28 @@ dd {
 
   .sidebar-status {
     display: none;
+  }
+
+  .device-record-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .device-actions {
+    align-items: stretch;
+  }
+
+  .device-actions button {
+    flex: 1;
+  }
+
+  .ato-summary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .ato-summary p {
+    width: 100%;
+    text-align: left;
   }
 
   .sidebar-action {

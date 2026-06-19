@@ -119,6 +119,14 @@ export async function getUserRiskProfile(userId: string) {
   return response.data;
 }
 
+export async function updateDeviceTrust(userId: string, fingerprint: string, status: "TRUSTED" | "BLOCKED") {
+  const response = await api.patch(
+    `/customers/${encodeURIComponent(userId)}/devices/${encodeURIComponent(fingerprint)}`,
+    { status }
+  );
+  return response.data;
+}
+
 export async function getCases(filters: Record<string, string> = {}) {
   const params = Object.fromEntries(Object.entries(filters).filter(([, value]) => value));
   const response = await api.get<CaseSummary[]>("/cases", { params });

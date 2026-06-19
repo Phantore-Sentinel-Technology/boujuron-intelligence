@@ -147,3 +147,81 @@ def test_transaction_velocity_window_adds_risk():
     assert "Transaction velocity spike" in result["reasons"]
     assert result["risk_level"] == "MEDIUM"
     assert result["action"] == "VERIFY"
+
+
+def test_failed_device_attestation_is_high_risk():
+    result = analyze_event({
+        "user_id": "acct_attestation",
+        "amount": 5_000,
+        "device": "android",
+        "device_attestation": "FAILED",
+        "ip": "102.88.45.27",
+        "location": "nigeria",
+        "event_type": "login",
+        "timestamp": "2026-06-19T12:00:00",
+    })
+
+    assert "Device attestation failed" in result["reasons"]
+    assert result["risk_level"] == "MEDIUM"
+
+
+def test_blocked_fingerprint_is_locked_immediately():
+    result = analyze_event(
+        {
+            "user_id": "acct_blocked_device",
+            "amount": 0,
+            "device": "iphone",
+            "ip": "102.88.45.28",
+            "location": "nigeria",
+            "event_type": "login",
+            "timestamp": "2026-06-19T12:00:00",
+        },
+        {
+            "device_intelligence": {
+                "fingerprint": "blocked-device",
+                "status": "BLOCKED",
+                "is_new_device": False,
+            },
+        },
+    )
+
+    assert result["risk_score"] == 80
+    assert result["risk_level"] == "HIGH"
+    assert result["action"] == "BLOCK"
+
+
+def test_correlated_takeover_signals_produce_lock_recommendation():
+    result = analyze_event(
+        {
+            "user_id": "acct_correlated_ato",
+            "amount": 0,
+            "device": "android",
+            "ip": "102.88.45.29",
+            "location": "kenya",
+            "event_type": "login_success",
+            "timestamp": "2026-06-19T12:00:00",
+        },
+        {
+            "account_takeover": {
+                "signals": [
+                    {
+                        "category": "ACCOUNT_TAKEOVER",
+                        "label": "New device after SIM change",
+                        "points": 55,
+                        "evidence": "New device appeared shortly after a SIM change",
+                    },
+                    {
+                        "category": "ACCOUNT_TAKEOVER",
+                        "label": "Successful login after failure burst",
+                        "points": 45,
+                        "evidence": "Successful login followed repeated failures",
+                    },
+                ],
+            },
+        },
+    )
+
+    assert result["account_takeover"]["detected"] is True
+    assert result["account_takeover"]["score"] == 100
+    assert result["account_takeover"]["recommendation"] == "LOCK_ACCOUNT"
+    assert result["action"] == "LOCK_ACCOUNT"

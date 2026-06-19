@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { AlertTriangle, ArrowLeft, History, MapPin, MonitorSmartphone, Network, ShieldAlert, TrendingUp } from "lucide-react";
+import { AlertTriangle, ArrowLeft, History, KeyRound, MapPin, MonitorSmartphone, Network, ShieldAlert, ShieldCheck, ShieldX, TrendingUp } from "lucide-react";
 import type { UserRiskProfile } from "../types";
-import { getUserRiskProfile } from "../services/api";
+import { getUserRiskProfile, updateDeviceTrust } from "../services/api";
 import { RiskBadge } from "../components/RiskBadge";
 import { ScoreBreakdown } from "../components/ScoreBreakdown";
 
@@ -10,6 +10,7 @@ export function CustomerProfile() {
   const { userId = "" } = useParams();
   const [profile, setProfile] = useState<UserRiskProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [updatingDevice, setUpdatingDevice] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -27,6 +28,21 @@ export function CustomerProfile() {
 
   if (loading) return <div className="empty-state">Loading user risk profile...</div>;
   if (!profile) return <div className="empty-state">No profile found for {userId}.</div>;
+
+  async function setDeviceStatus(fingerprint: string, status: "TRUSTED" | "BLOCKED") {
+    setUpdatingDevice(fingerprint);
+    try {
+      const updated = await updateDeviceTrust(userId, fingerprint, status);
+      setProfile((current) => current ? {
+        ...current,
+        device_inventory: current.device_inventory.map((device) =>
+          device.fingerprint === fingerprint ? updated : device
+        )
+      } : current);
+    } finally {
+      setUpdatingDevice(null);
+    }
+  }
 
   return (
     <div className="profile-page">
@@ -94,6 +110,97 @@ export function CustomerProfile() {
 
         <section className="insight-panel profile-card breakdown-card">
           <ScoreBreakdown items={profile.score_breakdown} total={profile.current_risk} />
+        </section>
+      </div>
+
+      <div className="profile-grid wide">
+        <section className="insight-panel profile-card">
+          <div className="section-header compact">
+            <div>
+              <p className="eyebrow">Device fingerprinting</p>
+              <h3>Device Trust Inventory</h3>
+            </div>
+            <MonitorSmartphone size={20} />
+          </div>
+          <div className="device-inventory">
+            {profile.device_inventory.map((device) => (
+              <article className={`device-record ${device.status.toLowerCase()}`} key={device.fingerprint}>
+                <div className="device-record-heading">
+                  <div>
+                    <strong>{device.label}</strong>
+                    <span>{device.fingerprint.slice(0, 16)}...</span>
+                  </div>
+                  <span className={`device-status ${device.status.toLowerCase()}`}>{device.status}</span>
+                </div>
+                <div className="device-record-facts">
+                  <span>Trust <strong>{device.trust_score}/100</strong></span>
+                  <span>Events <strong>{device.event_count}</strong></span>
+                  <span>Last location <strong>{device.last_location || "Unknown"}</strong></span>
+                  <span>Last IP <strong>{device.last_ip || "Unknown"}</strong></span>
+                </div>
+                {device.integrity_flags.length > 0 && (
+                  <div className="integrity-flags">
+                    {device.integrity_flags.map((flag) => <span key={flag}>{flag.replaceAll("_", " ")}</span>)}
+                  </div>
+                )}
+                <div className="device-actions">
+                  <button
+                    className="secondary-button compact"
+                    disabled={updatingDevice === device.fingerprint || device.status === "TRUSTED"}
+                    onClick={() => setDeviceStatus(device.fingerprint, "TRUSTED")}
+                    type="button"
+                  >
+                    <ShieldCheck size={15} /> Trust
+                  </button>
+                  <button
+                    className="danger-button compact"
+                    disabled={updatingDevice === device.fingerprint || device.status === "BLOCKED"}
+                    onClick={() => setDeviceStatus(device.fingerprint, "BLOCKED")}
+                    type="button"
+                  >
+                    <ShieldX size={15} /> Block
+                  </button>
+                </div>
+              </article>
+            ))}
+            {profile.device_inventory.length === 0 && <div className="empty-state slim">No device fingerprints captured yet.</div>}
+          </div>
+        </section>
+
+        <section className="insight-panel profile-card">
+          <div className="section-header compact">
+            <div>
+              <p className="eyebrow">Account takeover defense</p>
+              <h3>Security State</h3>
+            </div>
+            <KeyRound size={20} />
+          </div>
+          {profile.account_security ? (
+            <>
+              <div className="ato-summary">
+                <div>
+                  <span>ATO risk</span>
+                  <strong>{profile.account_security.takeover_risk}</strong>
+                </div>
+                <RiskBadge level={profile.account_security.takeover_level} />
+                <p>{profile.account_security.recommendation.replaceAll("_", " ")}</p>
+              </div>
+              <div className="profile-facts security-facts">
+                <div><span>Recent failed logins</span><strong>{profile.account_security.recent_failed_logins}</strong></div>
+                <div><span>Last successful login</span><strong>{profile.account_security.last_successful_login_at || "Not observed"}</strong></div>
+                <div><span>Password changed</span><strong>{profile.account_security.password_changed_at || "No recent change"}</strong></div>
+                <div><span>SIM changed</span><strong>{profile.account_security.sim_changed_at || "No recent change"}</strong></div>
+              </div>
+              <div className="anomaly-list security-indicators">
+                {profile.account_security.indicators.map((indicator) => (
+                  <div className="anomaly-item critical" key={indicator}>
+                    <strong>{indicator}</strong>
+                  </div>
+                ))}
+                {profile.account_security.indicators.length === 0 && <div className="empty-state slim">No takeover indicators active.</div>}
+              </div>
+            </>
+          ) : <div className="empty-state slim">No authentication security activity captured yet.</div>}
         </section>
       </div>
 

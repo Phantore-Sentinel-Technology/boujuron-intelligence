@@ -72,6 +72,8 @@ def analyze_event(event, behavior=None):
     network = str(event.get("network") or "").upper().strip()
     event_type = str(event.get("event_type") or "transaction").lower().strip()
     timestamp = _parse_timestamp(event.get("timestamp"))
+    device_intelligence = behavior.get("device_intelligence") or {}
+    takeover_context = behavior.get("account_takeover") or {}
 
     if amount >= 2_000_000:
         signals.append(_signal("TRANSACTION", "Extremely large transaction", 60, f"Amount {amount:.2f} is at least 2,000,000"))
@@ -111,10 +113,25 @@ def analyze_event(event, behavior=None):
         signals.append(_signal("DEVICE", "Rooted device detected", 45, "Device integrity checks indicate root access"))
     if event.get("browser_tampering"):
         signals.append(_signal("DEVICE", "Browser manipulation detected", 35, "Browser fingerprint or runtime integrity changed"))
+    if str(event.get("device_attestation") or "").upper() in {"FAILED", "INVALID", "UNTRUSTED"}:
+        signals.append(_signal("DEVICE", "Device attestation failed", 45, "Client device integrity proof could not be trusted"))
+
+    device_status = str(device_intelligence.get("status") or "").upper()
+    if device_status == "BLOCKED":
+        signals.append(_signal("DEVICE", "Blocked device fingerprint", 80, "This device fingerprint was previously blocked"))
+    elif device_status == "SUSPICIOUS":
+        signals.append(_signal("DEVICE", "Suspicious device fingerprint", 35, "This device fingerprint has prior high-risk activity"))
 
     known_devices = {str(item).lower().strip() for item in behavior.get("known_devices", []) if item}
     device_identity = device_id.lower() or device
-    if profile_ready and device_identity and known_devices and device_identity not in known_devices:
+    if device_intelligence.get("is_new_device") and profile_ready:
+        signals.append(_signal(
+            "BEHAVIOR",
+            "New device",
+            int(risk_settings.get("new_device_points", 25)),
+            f"Fingerprint {device_intelligence.get('fingerprint', '')[:12]} has not been seen for this user",
+        ))
+    elif profile_ready and device_identity and known_devices and device_identity not in known_devices:
         signals.append(_signal(
             "BEHAVIOR",
             "New device",
@@ -127,21 +144,24 @@ def analyze_event(event, behavior=None):
 
     if network == "TOR":
         signals.append(_signal("NETWORK", "TOR network detected", TOR_NETWORK_SCORE, "Connection is routed through TOR"))
-    elif network == "VPN":
-        signals.append(_signal("NETWORK", "VPN usage detected", 25, "Connection is routed through a VPN"))
+    elif network in {"VPN", "PROXY"}:
+        signals.append(_signal("NETWORK", f"{network} usage detected", 25, f"Connection is routed through a {network}"))
 
-    if event_type == "multiple_failed_logins":
+    if event_type in {"multiple_failed_logins", "login_failure"}:
         signals.append(_signal("ACCOUNT_TAKEOVER", "Multiple failed login attempts", 30, "Repeated authentication failures were reported"))
-    elif event_type == "password_reset":
+    elif event_type in {"password_reset", "password_change"}:
         signals.append(_signal("ACCOUNT_TAKEOVER", "Password reset activity", 10, "A password reset occurred during this activity"))
+    elif event_type == "sim_swap":
+        signals.append(_signal("ACCOUNT_TAKEOVER", "SIM swap indicator", 50, "Mobile identity telemetry indicates a recent SIM change"))
 
     failed_login_count = int(event.get("failed_login_count") or 0)
     if failed_login_count >= 5 and event_type != "multiple_failed_logins":
         signals.append(_signal("ACCOUNT_TAKEOVER", "Login velocity spike", 30, f"{failed_login_count} recent failed login attempts"))
     if event.get("password_changed_recently"):
         signals.append(_signal("ACCOUNT_TAKEOVER", "Recent password change", 20, "Password changed shortly before this event"))
-    if event.get("sim_swap_detected"):
+    if event.get("sim_swap_detected") and event_type != "sim_swap":
         signals.append(_signal("ACCOUNT_TAKEOVER", "SIM swap indicator", 50, "Mobile identity telemetry indicates a recent SIM change"))
+    signals.extend(takeover_context.get("signals") or [])
 
     transaction_velocity = int(behavior.get("transaction_velocity") or 0)
     transaction_limit = int(risk_settings.get("transaction_velocity_limit", 5))
@@ -156,7 +176,7 @@ def analyze_event(event, behavior=None):
             velocity_points,
             f"{transaction_velocity + 1} transactions within {velocity_minutes} minutes",
         ))
-    if event_type in {"login", "multiple_failed_logins"} and login_velocity >= login_limit:
+    if event_type in {"login", "login_success", "login_failure", "multiple_failed_logins"} and login_velocity >= login_limit:
         signals.append(_signal(
             "ACCOUNT_TAKEOVER",
             "Login velocity spike",
@@ -191,14 +211,40 @@ def analyze_event(event, behavior=None):
         risk_level = "LOW"
 
     reasons = [item["label"] for item in signals]
+    takeover_signals = [item for item in signals if item["category"] == "ACCOUNT_TAKEOVER"]
+    takeover_score = min(sum(item["points"] for item in takeover_signals), 100)
+    if takeover_score >= 70:
+        takeover_level = "CRITICAL"
+        takeover_recommendation = "LOCK_ACCOUNT"
+    elif takeover_score >= 40:
+        takeover_level = "HIGH"
+        takeover_recommendation = "BLOCK_AND_VERIFY"
+    elif takeover_score > 0:
+        takeover_level = "MEDIUM"
+        takeover_recommendation = "STEP_UP_VERIFICATION"
+    else:
+        takeover_level = "LOW"
+        takeover_recommendation = "ALLOW"
+    action = _action_for_level(risk_level)
+    recommendation = _recommendation_for_level(risk_level)
+    if takeover_score >= 70:
+        action = "LOCK_ACCOUNT"
+        recommendation = "LOCK_ACCOUNT_AND_ESCALATE"
     return {
         "risk_score": score,
         "risk_level": risk_level,
-        "action": _action_for_level(risk_level),
-        "recommendation": _recommendation_for_level(risk_level),
+        "action": action,
+        "recommendation": recommendation,
         "reason": ", ".join(reasons) if reasons else "Normal activity",
         "reasons": reasons,
         "signals": signals,
         "confidence": min(99, max(55, score + 4)),
         "behavioral_match": not any(item["category"] == "BEHAVIOR" for item in signals),
+        "account_takeover": {
+            "detected": takeover_score >= 70,
+            "score": takeover_score,
+            "level": takeover_level,
+            "recommendation": takeover_recommendation,
+            "indicators": [item["label"] for item in takeover_signals],
+        },
     }

@@ -30,6 +30,7 @@ from services.dashboard_service.schemas import (
     BehaviorEvaluationResponse,
     BehaviorSettingsResponse,
     BehaviorSettingsUpdate,
+    AccountSecurityResponse,
     AnalystPerformanceResponse,
     AnalyticsOverviewResponse,
     CaseDetailResponse,
@@ -39,6 +40,8 @@ from services.dashboard_service.schemas import (
     CaseTimelineResponse,
     CaseUpdateRequest,
     DemoFraudEventRequest,
+    DeviceProfileResponse,
+    DeviceTrustUpdate,
     EventResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
@@ -165,6 +168,51 @@ def ensure_organization_tables(cursor):
     """)
 
 
+def ensure_device_security_tables(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS device_fingerprints (
+            organization_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            label TEXT DEFAULT '',
+            status TEXT DEFAULT 'NEW',
+            trust_score INTEGER DEFAULT 25,
+            first_seen_at TIMESTAMP NOT NULL,
+            last_seen_at TIMESTAMP NOT NULL,
+            event_count INTEGER DEFAULT 1,
+            last_ip TEXT,
+            last_location TEXT,
+            platform TEXT,
+            operating_system TEXT,
+            browser TEXT,
+            user_agent TEXT,
+            integrity_flags JSONB DEFAULT '[]'::jsonb,
+            metadata JSONB DEFAULT '{}'::jsonb,
+            PRIMARY KEY (organization_id, user_id, fingerprint)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS account_security_state (
+            organization_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            password_changed_at TIMESTAMP,
+            sim_changed_at TIMESTAMP,
+            last_successful_login_at TIMESTAMP,
+            last_login_fingerprint TEXT,
+            last_login_ip TEXT,
+            last_login_location TEXT,
+            failed_login_count INTEGER DEFAULT 0,
+            failed_login_window_started_at TIMESTAMP,
+            takeover_risk INTEGER DEFAULT 0,
+            takeover_level TEXT DEFAULT 'LOW',
+            recommendation TEXT DEFAULT 'ALLOW',
+            indicators JSONB DEFAULT '[]'::jsonb,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (organization_id, user_id)
+        )
+    """)
+
+
 def default_organization_id(cursor) -> int:
     ensure_organization_tables(cursor)
     cursor.execute("SELECT id FROM organizations WHERE slug = 'boujuron'")
@@ -282,6 +330,8 @@ def ensure_risk_decision_table(cursor):
         ("analyst_feedback", "TEXT"),
         ("feedback_at", "TIMESTAMP"),
         ("learned", "BOOLEAN DEFAULT FALSE"),
+        ("device_intelligence", "JSONB"),
+        ("account_takeover", "JSONB"),
     ):
         cursor.execute(f"""
             ALTER TABLE risk_decisions
@@ -364,6 +414,8 @@ def ensure_fraud_alert_columns(cursor):
 
 
 def prepare_analytics_tables(cursor):
+    ensure_organization_tables(cursor)
+    ensure_device_security_tables(cursor)
     ensure_event_table(cursor)
     ensure_fraud_alert_table(cursor)
     ensure_case_tables(cursor)
@@ -688,6 +740,309 @@ def usual_hours(hour_histogram: dict) -> tuple[int | None, int | None]:
     return max(center - 3, 0), min(center + 3, 23)
 
 
+def event_datetime(value: str) -> datetime:
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+
+
+def device_fingerprint(event: dict) -> str:
+    device_id = str(event.get("device_id") or "").strip().lower()
+    if device_id:
+        return hashlib.sha256(f"device-id|{device_id}".encode("utf-8")).hexdigest()[:32]
+    stable_parts = [
+        event.get("platform"),
+        event.get("operating_system"),
+        event.get("browser"),
+        event.get("user_agent"),
+        event.get("screen_resolution"),
+        event.get("timezone"),
+        event.get("language"),
+        event.get("app_version"),
+        event.get("device_type") or event.get("device"),
+    ]
+    canonical = "|".join(str(part or "").strip().lower() for part in stable_parts)
+    if not canonical.replace("|", ""):
+        canonical = f"unknown|{event.get('ip', '')}"
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+
+
+def device_integrity_flags(event: dict) -> list[str]:
+    flags = []
+    if event.get("is_rooted"):
+        flags.append("ROOTED")
+    if event.get("is_emulator"):
+        flags.append("EMULATOR")
+    if event.get("browser_tampering"):
+        flags.append("BROWSER_TAMPERING")
+    attestation = str(event.get("device_attestation") or "").upper()
+    if attestation in {"FAILED", "INVALID", "UNTRUSTED"}:
+        flags.append("ATTESTATION_FAILED")
+    network = str(event.get("network") or "").upper()
+    if network in {"VPN", "TOR", "PROXY"}:
+        flags.append(network)
+    return flags
+
+
+def load_device_intelligence(cursor, organization_id: int, user_id: str, event: dict) -> dict:
+    fingerprint = device_fingerprint(event)
+    cursor.execute("""
+        SELECT status, trust_score, first_seen_at, last_seen_at, event_count, integrity_flags
+        FROM device_fingerprints
+        WHERE organization_id = %s AND user_id = %s AND fingerprint = %s
+    """, (organization_id, user_id, fingerprint))
+    row = cursor.fetchone()
+    timestamp = event_datetime(event["timestamp"])
+    flags = sorted(set(device_integrity_flags(event) + (list(row[5] or []) if row else [])))
+    return {
+        "fingerprint": fingerprint,
+        "status": row[0] if row else "NEW",
+        "trust_score": int(row[1] or 0) if row else 25,
+        "is_new_device": row is None,
+        "first_seen_at": str(row[2] if row else timestamp),
+        "last_seen_at": str(timestamp),
+        "event_count": int(row[4] or 0) + 1 if row else 1,
+        "integrity_flags": flags,
+    }
+
+
+def load_account_takeover_context(
+    cursor,
+    organization_id: int,
+    user_id: str,
+    event: dict,
+    device_data: dict,
+) -> dict:
+    cursor.execute("""
+        SELECT password_changed_at, sim_changed_at, last_successful_login_at,
+               last_login_fingerprint, last_login_ip, last_login_location,
+               failed_login_count, failed_login_window_started_at
+        FROM account_security_state
+        WHERE organization_id = %s AND user_id = %s
+    """, (organization_id, user_id))
+    row = cursor.fetchone()
+    now = event_datetime(event["timestamp"])
+    password_changed_at = row[0] if row else None
+    sim_changed_at = row[1] if row else None
+    last_login_at = row[2] if row else None
+    last_fingerprint = row[3] if row else None
+    last_ip = row[4] if row else None
+    last_location = row[5] if row else None
+    stored_failures = int(row[6] or 0) if row else 0
+    failed_window = row[7] if row else None
+
+    event_type = str(event.get("event_type") or "").lower()
+    password_recent = bool(event.get("password_changed_recently"))
+    if password_changed_at and now - password_changed_at <= timedelta(hours=24):
+        password_recent = True
+    sim_recent = bool(event.get("sim_swap_detected"))
+    if sim_changed_at and now - sim_changed_at <= timedelta(hours=72):
+        sim_recent = True
+
+    failures = max(stored_failures, int(event.get("failed_login_count") or 0))
+    if failed_window and now - failed_window > timedelta(minutes=30):
+        failures = int(event.get("failed_login_count") or 0)
+        failed_window = None
+
+    correlated_signals = []
+    if device_data["is_new_device"] and password_recent:
+        correlated_signals.append({
+            "category": "ACCOUNT_TAKEOVER",
+            "label": "New device after password change",
+            "points": 35,
+            "evidence": "A previously unseen device appeared within 24 hours of a password change",
+        })
+    if device_data["is_new_device"] and sim_recent:
+        correlated_signals.append({
+            "category": "ACCOUNT_TAKEOVER",
+            "label": "New device after SIM change",
+            "points": 55,
+            "evidence": "A previously unseen device appeared within 72 hours of a SIM change",
+        })
+    if event_type in {"login", "login_success"} and failures >= 5:
+        correlated_signals.append({
+            "category": "ACCOUNT_TAKEOVER",
+            "label": "Successful login after failure burst",
+            "points": 45,
+            "evidence": f"Successful authentication followed {failures} recent failed attempts",
+        })
+    if (
+        event_type in {"login", "login_success"}
+        and last_login_at
+        and now - last_login_at <= timedelta(minutes=30)
+        and last_fingerprint
+        and last_fingerprint != device_data["fingerprint"]
+    ):
+        correlated_signals.append({
+            "category": "ACCOUNT_TAKEOVER",
+            "label": "Rapid device switching",
+            "points": 30,
+            "evidence": "The account authenticated from different device fingerprints within 30 minutes",
+        })
+    current_location = str(event.get("location") or "").strip().lower()
+    if (
+        event_type in {"login", "login_success"}
+        and last_login_at
+        and now - last_login_at <= timedelta(minutes=30)
+        and last_location
+        and current_location
+        and last_location.lower() != current_location
+    ):
+        correlated_signals.append({
+            "category": "ACCOUNT_TAKEOVER",
+            "label": "Rapid location change",
+            "points": 30,
+            "evidence": f"Login location changed from {last_location} to {event.get('location')} within 30 minutes",
+        })
+    if last_ip and event.get("ip") and last_ip != event["ip"] and device_data["is_new_device"]:
+        correlated_signals.append({
+            "category": "ACCOUNT_TAKEOVER",
+            "label": "New device and network identity",
+            "points": 20,
+            "evidence": "Both device fingerprint and IP address changed from the previous login",
+        })
+
+    return {
+        "signals": correlated_signals,
+        "password_changed_at": password_changed_at,
+        "sim_changed_at": sim_changed_at,
+        "last_successful_login_at": last_login_at,
+        "last_login_fingerprint": last_fingerprint,
+        "last_login_ip": last_ip,
+        "last_login_location": last_location,
+        "failed_login_count": failures,
+        "failed_login_window_started_at": failed_window,
+    }
+
+
+def persist_device_intelligence(
+    cursor,
+    organization_id: int,
+    user_id: str,
+    event: dict,
+    device_data: dict,
+    risk_result: dict,
+):
+    flags = device_data["integrity_flags"]
+    prior_status = device_data["status"]
+    event_count = device_data["event_count"]
+    if risk_result["account_takeover"]["detected"] or risk_result["risk_score"] >= 90:
+        status = "BLOCKED"
+        trust_score = 0
+    elif flags or risk_result["risk_score"] >= 70:
+        status = "SUSPICIOUS"
+        trust_score = min(device_data["trust_score"], 20)
+    elif prior_status == "TRUSTED" or (event_count >= 2 and risk_result["risk_score"] < 40):
+        status = "TRUSTED"
+        trust_score = min(100, max(device_data["trust_score"], 60) + 5)
+    else:
+        status = "NEW"
+        trust_score = max(device_data["trust_score"], 25)
+
+    device_data["status"] = status
+    device_data["trust_score"] = trust_score
+    cursor.execute("""
+        INSERT INTO device_fingerprints (
+            organization_id, user_id, fingerprint, label, status, trust_score,
+            first_seen_at, last_seen_at, event_count, last_ip, last_location,
+            platform, operating_system, browser, user_agent, integrity_flags, metadata
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (organization_id, user_id, fingerprint) DO UPDATE SET
+            label = EXCLUDED.label,
+            status = EXCLUDED.status,
+            trust_score = EXCLUDED.trust_score,
+            last_seen_at = EXCLUDED.last_seen_at,
+            event_count = device_fingerprints.event_count + 1,
+            last_ip = EXCLUDED.last_ip,
+            last_location = EXCLUDED.last_location,
+            platform = EXCLUDED.platform,
+            operating_system = EXCLUDED.operating_system,
+            browser = EXCLUDED.browser,
+            user_agent = EXCLUDED.user_agent,
+            integrity_flags = EXCLUDED.integrity_flags,
+            metadata = EXCLUDED.metadata
+    """, (
+        organization_id,
+        user_id,
+        device_data["fingerprint"],
+        event.get("device_id") or event.get("device_type") or event.get("device") or "Unknown device",
+        status,
+        trust_score,
+        event_datetime(device_data["first_seen_at"]),
+        event_datetime(event["timestamp"]),
+        1,
+        event.get("ip"),
+        event.get("location"),
+        event.get("platform"),
+        event.get("operating_system"),
+        event.get("browser"),
+        event.get("user_agent"),
+        Json(flags),
+        Json(event.get("metadata") or {}),
+    ))
+
+
+def persist_account_security_state(
+    cursor,
+    organization_id: int,
+    user_id: str,
+    event: dict,
+    device_data: dict,
+    takeover: dict,
+    context: dict,
+):
+    now = event_datetime(event["timestamp"])
+    event_type = str(event.get("event_type") or "").lower()
+    password_at = now if event_type in {"password_change", "password_reset"} or event.get("password_changed_recently") else context["password_changed_at"]
+    sim_at = now if event_type == "sim_swap" or event.get("sim_swap_detected") else context["sim_changed_at"]
+    failed_count = context["failed_login_count"]
+    failed_window = context["failed_login_window_started_at"]
+    if event_type in {"login_failure", "multiple_failed_logins"}:
+        failed_count = max(failed_count + 1, int(event.get("failed_login_count") or 0))
+        failed_window = now
+    elif event_type in {"login", "login_success"}:
+        failed_count = 0
+
+    successful_login = event_type in {"login", "login_success"}
+    cursor.execute("""
+        INSERT INTO account_security_state (
+            organization_id, user_id, password_changed_at, sim_changed_at,
+            last_successful_login_at, last_login_fingerprint, last_login_ip,
+            last_login_location, failed_login_count, failed_login_window_started_at,
+            takeover_risk, takeover_level, recommendation, indicators, updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+        ON CONFLICT (organization_id, user_id) DO UPDATE SET
+            password_changed_at = EXCLUDED.password_changed_at,
+            sim_changed_at = EXCLUDED.sim_changed_at,
+            last_successful_login_at = COALESCE(EXCLUDED.last_successful_login_at, account_security_state.last_successful_login_at),
+            last_login_fingerprint = COALESCE(EXCLUDED.last_login_fingerprint, account_security_state.last_login_fingerprint),
+            last_login_ip = COALESCE(EXCLUDED.last_login_ip, account_security_state.last_login_ip),
+            last_login_location = COALESCE(EXCLUDED.last_login_location, account_security_state.last_login_location),
+            failed_login_count = EXCLUDED.failed_login_count,
+            failed_login_window_started_at = EXCLUDED.failed_login_window_started_at,
+            takeover_risk = EXCLUDED.takeover_risk,
+            takeover_level = EXCLUDED.takeover_level,
+            recommendation = EXCLUDED.recommendation,
+            indicators = EXCLUDED.indicators,
+            updated_at = CURRENT_TIMESTAMP
+    """, (
+        organization_id,
+        user_id,
+        password_at,
+        sim_at,
+        now if successful_login else None,
+        device_data["fingerprint"] if successful_login else None,
+        event.get("ip") if successful_login else None,
+        event.get("location") if successful_login else None,
+        failed_count,
+        failed_window,
+        takeover["score"],
+        takeover["level"],
+        takeover["recommendation"],
+        Json(takeover["indicators"]),
+    ))
+
+
 def behavioral_context(cursor, organization_id: int, user_id: str, event_timestamp: str) -> dict:
     ensure_organization_tables(cursor)
     ensure_event_table(cursor)
@@ -749,7 +1104,7 @@ def behavioral_context(cursor, organization_id: int, user_id: str, event_timesta
     cursor.execute("""
         SELECT
             COUNT(*) FILTER (WHERE LOWER(event_type) IN ('transaction', 'large_transfer', 'transfer', 'payment')),
-            COUNT(*) FILTER (WHERE LOWER(event_type) IN ('login', 'multiple_failed_logins'))
+            COUNT(*) FILTER (WHERE LOWER(event_type) IN ('login', 'login_success', 'login_failure', 'multiple_failed_logins'))
         FROM events
         WHERE user_id = %s
           AND (organization_id = %s OR organization_id IS NULL)
@@ -1316,7 +1671,9 @@ def risk_response_from_row(row) -> RiskScoreResponse:
         reasons=row[8] or [],
         signals=row[9] or [],
         behavioral_match=bool(row[10]),
-        created_at=str(row[11]),
+        device_intelligence=row[11],
+        account_takeover=row[12],
+        created_at=str(row[13]),
     )
 
 
@@ -1342,7 +1699,7 @@ async def score_risk(
     if idempotency_key:
         cursor.execute("""
             SELECT id, transaction_id, user_id, risk_score, risk_level, action, recommendation, confidence,
-                   reasons, signals, behavioral_match, created_at
+                   reasons, signals, behavioral_match, device_intelligence, account_takeover, created_at
             FROM risk_decisions
             WHERE idempotency_key = %s
         """, (idempotency_key,))
@@ -1351,8 +1708,28 @@ async def score_risk(
             conn.close()
             return risk_response_from_row(existing)
 
+    device_data = load_device_intelligence(cursor, organization_id, payload.user_id, event)
+    takeover_context = load_account_takeover_context(
+        cursor,
+        organization_id,
+        payload.user_id,
+        event,
+        device_data,
+    )
     behavior = behavioral_context(cursor, organization_id, payload.user_id, event["timestamp"])
+    behavior["device_intelligence"] = device_data
+    behavior["account_takeover"] = takeover_context
     result = analyze_event(event, behavior)
+    persist_device_intelligence(cursor, organization_id, payload.user_id, event, device_data, result)
+    persist_account_security_state(
+        cursor,
+        organization_id,
+        payload.user_id,
+        event,
+        device_data,
+        result["account_takeover"],
+        takeover_context,
+    )
     settings_data = behavior["settings"]
     trusted_for_learning = bool(
         settings_data["adaptive_learning_enabled"]
@@ -1394,11 +1771,12 @@ async def score_risk(
         INSERT INTO risk_decisions (
             organization_id, transaction_id, idempotency_key, user_id, risk_score, risk_level,
             action, recommendation, confidence, reasons, signals, behavioral_match,
-            request_payload, source, learned
+            request_payload, source, learned, device_intelligence, account_takeover
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id, transaction_id, user_id, risk_score, risk_level, action,
-                  recommendation, confidence, reasons, signals, behavioral_match, created_at
+                  recommendation, confidence, reasons, signals, behavioral_match,
+                  device_intelligence, account_takeover, created_at
     """, (
         organization_id,
         transaction_id,
@@ -1415,6 +1793,8 @@ async def score_risk(
         Json(event),
         source,
         trusted_for_learning,
+        Json(device_data),
+        Json(result["account_takeover"]),
     ))
     decision_row = cursor.fetchone()
 
@@ -1662,14 +2042,16 @@ def get_user_activity(user_id: str):
 @app.get("/customers/{user_id}/profile", response_model=UserProfileResponse)
 def get_user_profile(user_id: str, current_user: AuthUserResponse = Depends(get_current_user)):
     conn, cursor = get_db()
+    prepare_analytics_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
 
     cursor.execute("""
         SELECT event_type, device_type, ip, location, network, amount, timestamp
         FROM events
-        WHERE user_id = %s
+        WHERE user_id = %s AND (organization_id = %s OR organization_id IS NULL)
         ORDER BY timestamp DESC NULLS LAST, id DESC
         LIMIT 25
-    """, (user_id,))
+    """, (user_id, organization_id))
     event_rows = cursor.fetchall()
 
     cursor.execute("""
@@ -1684,11 +2066,31 @@ def get_user_profile(user_id: str, current_user: AuthUserResponse = Depends(get_
             signals_triggered,
             behavioral_match
         FROM fraud_alerts
-        WHERE user_id = %s
+        WHERE user_id = %s AND (organization_id = %s OR organization_id IS NULL)
         ORDER BY timestamp DESC NULLS LAST, id DESC
         LIMIT 20
-    """, (user_id,))
+    """, (user_id, organization_id))
     alert_rows = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT fingerprint, label, status, trust_score, first_seen_at, last_seen_at,
+               event_count, last_ip, last_location, integrity_flags
+        FROM device_fingerprints
+        WHERE organization_id = %s AND user_id = %s
+        ORDER BY last_seen_at DESC
+        LIMIT 20
+    """, (organization_id, user_id))
+    device_rows = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT takeover_risk, takeover_level, recommendation, failed_login_count,
+               password_changed_at, sim_changed_at, last_successful_login_at,
+               last_login_location, last_login_ip, last_login_fingerprint, indicators
+        FROM account_security_state
+        WHERE organization_id = %s AND user_id = %s
+    """, (organization_id, user_id))
+    security_row = cursor.fetchone()
+    conn.commit()
     conn.close()
 
     alerts = [
@@ -1727,6 +2129,36 @@ def get_user_profile(user_id: str, current_user: AuthUserResponse = Depends(get_
     new_devices = [device for device, count in device_counts.items() if count == 1][:5]
     known_locations = [location for location, count in location_counts.most_common() if count > 1][:5]
     amounts = [event.amount for event in events if event.amount is not None]
+    device_inventory = [
+        DeviceProfileResponse(
+            fingerprint=row[0],
+            label=row[1] or "Unknown device",
+            status=row[2],
+            trust_score=int(row[3] or 0),
+            first_seen_at=str(row[4]),
+            last_seen_at=str(row[5]),
+            event_count=int(row[6] or 0),
+            last_ip=row[7],
+            last_location=row[8],
+            integrity_flags=list(row[9] or []),
+        )
+        for row in device_rows
+    ]
+    account_security = None
+    if security_row:
+        account_security = AccountSecurityResponse(
+            takeover_risk=int(security_row[0] or 0),
+            takeover_level=security_row[1] or "LOW",
+            recommendation=security_row[2] or "ALLOW",
+            recent_failed_logins=int(security_row[3] or 0),
+            password_changed_at=str(security_row[4]) if security_row[4] else None,
+            sim_changed_at=str(security_row[5]) if security_row[5] else None,
+            last_successful_login_at=str(security_row[6]) if security_row[6] else None,
+            last_login_location=security_row[7],
+            last_login_ip=security_row[8],
+            last_login_device=security_row[9],
+            indicators=list(security_row[10] or []),
+        )
 
     return UserProfileResponse(
         user_id=user_id,
@@ -1758,6 +2190,48 @@ def get_user_profile(user_id: str, current_user: AuthUserResponse = Depends(get_
         recent_events=events[:10],
         previous_investigations=alerts,
         score_breakdown=build_score_breakdown(current_alert.reason if current_alert else None, current_score),
+        device_inventory=device_inventory,
+        account_security=account_security,
+    )
+
+
+@app.patch("/customers/{user_id}/devices/{fingerprint}", response_model=DeviceProfileResponse)
+def update_device_trust(
+    user_id: str,
+    fingerprint: str,
+    payload: DeviceTrustUpdate,
+    current_user: AuthUserResponse = Depends(get_current_user),
+):
+    if current_user.role not in {"Admin", "Fraud Analyst", "Investigator"}:
+        raise HTTPException(status_code=403, detail="Your role cannot change device trust")
+    conn, cursor = get_db()
+    ensure_device_security_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    trust_score = {"NEW": 25, "TRUSTED": 90, "SUSPICIOUS": 15, "BLOCKED": 0}[payload.status]
+    cursor.execute("""
+        UPDATE device_fingerprints
+        SET status = %s, trust_score = %s
+        WHERE organization_id = %s AND user_id = %s AND fingerprint = %s
+        RETURNING fingerprint, label, status, trust_score, first_seen_at, last_seen_at,
+                  event_count, last_ip, last_location, integrity_flags
+    """, (payload.status, trust_score, organization_id, user_id, fingerprint))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Device fingerprint not found")
+    conn.commit()
+    conn.close()
+    return DeviceProfileResponse(
+        fingerprint=row[0],
+        label=row[1] or "Unknown device",
+        status=row[2],
+        trust_score=int(row[3] or 0),
+        first_seen_at=str(row[4]),
+        last_seen_at=str(row[5]),
+        event_count=int(row[6] or 0),
+        last_ip=row[7],
+        last_location=row[8],
+        integrity_flags=list(row[9] or []),
     )
 
 

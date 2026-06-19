@@ -129,6 +129,15 @@ class RiskScoreRequest(BaseModel):
     device: str | None = None
     device_type: str | None = None
     device_id: str | None = None
+    platform: str | None = None
+    operating_system: str | None = None
+    browser: str | None = None
+    user_agent: str | None = None
+    screen_resolution: str | None = None
+    timezone: str | None = None
+    language: str | None = None
+    app_version: str | None = None
+    device_attestation: str | None = None
     ip: str = Field(min_length=1, max_length=160)
     location: str = ""
     network: str = ""
@@ -141,6 +150,8 @@ class RiskScoreRequest(BaseModel):
     sim_swap_detected: bool = False
     password_changed_recently: bool = False
     failed_login_count: int = Field(default=0, ge=0)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("timestamp")
@@ -161,6 +172,25 @@ class RiskSignalResponse(BaseModel):
     evidence: str
 
 
+class DeviceIntelligenceResponse(BaseModel):
+    fingerprint: str
+    status: str
+    trust_score: int
+    is_new_device: bool
+    first_seen_at: str
+    last_seen_at: str
+    event_count: int
+    integrity_flags: list[str]
+
+
+class AccountTakeoverResponse(BaseModel):
+    detected: bool
+    score: int
+    level: str
+    recommendation: str
+    indicators: list[str]
+
+
 class RiskScoreResponse(BaseModel):
     decision_id: int
     user_id: str
@@ -173,6 +203,8 @@ class RiskScoreResponse(BaseModel):
     reasons: list[str]
     signals: list[RiskSignalResponse]
     behavioral_match: bool
+    device_intelligence: DeviceIntelligenceResponse | None = None
+    account_takeover: AccountTakeoverResponse | None = None
     created_at: str
 
 
@@ -236,6 +268,45 @@ class BehaviorAnomaly(BaseModel):
     detail: str
 
 
+class DeviceProfileResponse(BaseModel):
+    fingerprint: str
+    label: str
+    status: str
+    trust_score: int
+    first_seen_at: str
+    last_seen_at: str
+    event_count: int
+    last_ip: str | None = None
+    last_location: str | None = None
+    integrity_flags: list[str]
+
+
+class DeviceTrustUpdate(BaseModel):
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value):
+        normalized = value.upper()
+        if normalized not in {"NEW", "TRUSTED", "SUSPICIOUS", "BLOCKED"}:
+            raise ValueError("status must be NEW, TRUSTED, SUSPICIOUS, or BLOCKED")
+        return normalized
+
+
+class AccountSecurityResponse(BaseModel):
+    takeover_risk: int
+    takeover_level: str
+    recommendation: str
+    recent_failed_logins: int
+    password_changed_at: str | None = None
+    sim_changed_at: str | None = None
+    last_successful_login_at: str | None = None
+    last_login_location: str | None = None
+    last_login_ip: str | None = None
+    last_login_device: str | None = None
+    indicators: list[str]
+
+
 class UserProfileResponse(BaseModel):
     user_id: str
     current_risk: int
@@ -252,6 +323,8 @@ class UserProfileResponse(BaseModel):
     recent_events: list[UserProfileEvent]
     previous_investigations: list[FraudAlertResponse]
     score_breakdown: list[ScoreBreakdownItem]
+    device_inventory: list[DeviceProfileResponse] = Field(default_factory=list)
+    account_security: AccountSecurityResponse | None = None
 
 
 CaseStatus = str
