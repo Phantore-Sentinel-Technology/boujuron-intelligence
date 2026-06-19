@@ -39,6 +39,7 @@ class AuthUserResponse(BaseModel):
     name: str
     email: str
     role: UserRole
+    organization_id: int | None = None
 
 
 class AuthTokenResponse(BaseModel):
@@ -77,6 +78,49 @@ class ApiKeyResponse(BaseModel):
     active: bool
     last_used_at: str | None = None
     created_at: str
+
+
+class BehaviorSettingsResponse(BaseModel):
+    organization_id: int
+    organization_name: str
+    amount_spike_multiplier: float
+    minimum_amount_delta: float
+    new_device_points: int
+    new_location_points: int
+    unusual_hour_points: int
+    velocity_window_minutes: int
+    transaction_velocity_limit: int
+    login_velocity_limit: int
+    velocity_points: int
+    minimum_profile_events: int
+    adaptive_learning_enabled: bool
+    trusted_learning_max_score: int
+
+
+class BehaviorSettingsUpdate(BaseModel):
+    amount_spike_multiplier: float | None = Field(default=None, ge=1.5, le=50)
+    minimum_amount_delta: float | None = Field(default=None, ge=0)
+    new_device_points: int | None = Field(default=None, ge=0, le=100)
+    new_location_points: int | None = Field(default=None, ge=0, le=100)
+    unusual_hour_points: int | None = Field(default=None, ge=0, le=100)
+    velocity_window_minutes: int | None = Field(default=None, ge=1, le=1440)
+    transaction_velocity_limit: int | None = Field(default=None, ge=1, le=10000)
+    login_velocity_limit: int | None = Field(default=None, ge=1, le=10000)
+    velocity_points: int | None = Field(default=None, ge=0, le=100)
+    minimum_profile_events: int | None = Field(default=None, ge=1, le=1000)
+    adaptive_learning_enabled: bool | None = None
+    trusted_learning_max_score: int | None = Field(default=None, ge=0, le=100)
+
+
+class BehaviorEvaluationResponse(BaseModel):
+    labeled_decisions: int
+    confirmed_fraud: int
+    false_positives: int
+    needs_review: int
+    precision: float
+    false_positive_rate: float
+    profiles_learning: int
+    trusted_events_learned: int
 
 
 class RiskScoreRequest(BaseModel):

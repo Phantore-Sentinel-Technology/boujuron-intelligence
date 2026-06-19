@@ -1,7 +1,16 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Code2, Copy, KeyRound, ShieldCheck, Trash2 } from "lucide-react";
-import type { ClientApiKey, InviteToken, UserRole } from "../types";
-import { createClientApiKey, createInvite, getClientApiKeys, getInvites, revokeClientApiKey } from "../services/api";
+import { Activity, Code2, Copy, KeyRound, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
+import type { BehaviorEvaluation, BehaviorSettings, ClientApiKey, InviteToken, UserRole } from "../types";
+import {
+  createClientApiKey,
+  createInvite,
+  getBehaviorEvaluation,
+  getBehaviorSettings,
+  getClientApiKeys,
+  getInvites,
+  revokeClientApiKey,
+  updateBehaviorSettings
+} from "../services/api";
 import { useAuth } from "../context/AuthContext";
 
 const thresholds = [
@@ -28,17 +37,23 @@ export function Settings() {
   const [createdApiKey, setCreatedApiKey] = useState<ClientApiKey | null>(null);
   const [apiKeyMessage, setApiKeyMessage] = useState("");
   const [creatingApiKey, setCreatingApiKey] = useState(false);
+  const [behaviorSettings, setBehaviorSettings] = useState<BehaviorSettings | null>(null);
+  const [evaluation, setEvaluation] = useState<BehaviorEvaluation | null>(null);
+  const [behaviorMessage, setBehaviorMessage] = useState("");
+  const [savingBehavior, setSavingBehavior] = useState(false);
   const isAdmin = user?.role === "Admin";
 
   useEffect(() => {
-    if (!isAdmin) return;
     setLoadingInvites(true);
-    Promise.all([getInvites(), getClientApiKeys()])
-      .then(([inviteData, apiKeyData]) => {
+    const adminRequests = isAdmin ? Promise.all([getInvites(), getClientApiKeys()]) : Promise.resolve([[], []] as [InviteToken[], ClientApiKey[]]);
+    Promise.all([adminRequests, getBehaviorSettings(), getBehaviorEvaluation()])
+      .then(([[inviteData, apiKeyData], settingsData, evaluationData]) => {
         setInvites(inviteData);
         setApiKeys(apiKeyData);
+        setBehaviorSettings(settingsData);
+        setEvaluation(evaluationData);
       })
-      .catch(() => setMessage("Could not load invite history."))
+      .catch(() => setMessage("Could not load all platform settings."))
       .finally(() => setLoadingInvites(false));
   }, [isAdmin]);
 
@@ -90,6 +105,39 @@ export function Settings() {
     await revokeClientApiKey(keyId);
     setApiKeys((current) => current.map((item) => item.id === keyId ? { ...item, active: false } : item));
     setApiKeyMessage("API key revoked.");
+  }
+
+  function updateBehaviorField<K extends keyof BehaviorSettings>(field: K, value: BehaviorSettings[K]) {
+    setBehaviorSettings((current) => current ? { ...current, [field]: value } : current);
+  }
+
+  async function onSaveBehavior(event: FormEvent) {
+    event.preventDefault();
+    if (!behaviorSettings) return;
+    setSavingBehavior(true);
+    setBehaviorMessage("");
+    try {
+      const updated = await updateBehaviorSettings({
+        amount_spike_multiplier: behaviorSettings.amount_spike_multiplier,
+        minimum_amount_delta: behaviorSettings.minimum_amount_delta,
+        new_device_points: behaviorSettings.new_device_points,
+        new_location_points: behaviorSettings.new_location_points,
+        unusual_hour_points: behaviorSettings.unusual_hour_points,
+        velocity_window_minutes: behaviorSettings.velocity_window_minutes,
+        transaction_velocity_limit: behaviorSettings.transaction_velocity_limit,
+        login_velocity_limit: behaviorSettings.login_velocity_limit,
+        velocity_points: behaviorSettings.velocity_points,
+        minimum_profile_events: behaviorSettings.minimum_profile_events,
+        adaptive_learning_enabled: behaviorSettings.adaptive_learning_enabled,
+        trusted_learning_max_score: behaviorSettings.trusted_learning_max_score
+      });
+      setBehaviorSettings(updated);
+      setBehaviorMessage("Behavioral intelligence policy saved.");
+    } catch {
+      setBehaviorMessage("Could not save behavioral policy. Admin access is required.");
+    } finally {
+      setSavingBehavior(false);
+    }
   }
 
   return (
@@ -243,6 +291,78 @@ export function Settings() {
           </>
         )}
       </section>
+
+      <section className="insight-panel access-panel">
+        <div className="section-header">
+          <div>
+            <p className="eyebrow">Behavioral intelligence</p>
+            <h2>Organization Baselines</h2>
+          </div>
+          <SlidersHorizontal size={22} />
+        </div>
+
+        {behaviorSettings && (
+          <form className="behavior-settings-form" onSubmit={onSaveBehavior}>
+            <div className="behavior-settings-grid">
+              <NumberSetting label="Amount spike multiplier" value={behaviorSettings.amount_spike_multiplier} step={0.5} onChange={(value) => updateBehaviorField("amount_spike_multiplier", value)} disabled={!isAdmin} />
+              <NumberSetting label="Minimum amount delta" value={behaviorSettings.minimum_amount_delta} step={10000} onChange={(value) => updateBehaviorField("minimum_amount_delta", value)} disabled={!isAdmin} />
+              <NumberSetting label="Profile events required" value={behaviorSettings.minimum_profile_events} onChange={(value) => updateBehaviorField("minimum_profile_events", value)} disabled={!isAdmin} />
+              <NumberSetting label="New device points" value={behaviorSettings.new_device_points} onChange={(value) => updateBehaviorField("new_device_points", value)} disabled={!isAdmin} />
+              <NumberSetting label="New location points" value={behaviorSettings.new_location_points} onChange={(value) => updateBehaviorField("new_location_points", value)} disabled={!isAdmin} />
+              <NumberSetting label="Unusual hour points" value={behaviorSettings.unusual_hour_points} onChange={(value) => updateBehaviorField("unusual_hour_points", value)} disabled={!isAdmin} />
+              <NumberSetting label="Velocity window (minutes)" value={behaviorSettings.velocity_window_minutes} onChange={(value) => updateBehaviorField("velocity_window_minutes", value)} disabled={!isAdmin} />
+              <NumberSetting label="Transaction limit" value={behaviorSettings.transaction_velocity_limit} onChange={(value) => updateBehaviorField("transaction_velocity_limit", value)} disabled={!isAdmin} />
+              <NumberSetting label="Login limit" value={behaviorSettings.login_velocity_limit} onChange={(value) => updateBehaviorField("login_velocity_limit", value)} disabled={!isAdmin} />
+              <NumberSetting label="Velocity points" value={behaviorSettings.velocity_points} onChange={(value) => updateBehaviorField("velocity_points", value)} disabled={!isAdmin} />
+              <NumberSetting label="Trusted learning max score" value={behaviorSettings.trusted_learning_max_score} onChange={(value) => updateBehaviorField("trusted_learning_max_score", value)} disabled={!isAdmin} />
+              <label className="toggle-setting">
+                <span>Adaptive learning</span>
+                <input type="checkbox" checked={behaviorSettings.adaptive_learning_enabled} onChange={(event) => updateBehaviorField("adaptive_learning_enabled", event.target.checked)} disabled={!isAdmin} />
+              </label>
+            </div>
+            {behaviorMessage && <p className="form-success">{behaviorMessage}</p>}
+            {isAdmin && <button className="primary-button behavior-save" disabled={savingBehavior}>{savingBehavior ? "Saving..." : "Save behavioral policy"}</button>}
+          </form>
+        )}
+      </section>
+
+      <section className="insight-panel access-panel">
+        <div className="section-header">
+          <div>
+            <p className="eyebrow">Model evaluation</p>
+            <h2>Adaptive Learning Health</h2>
+          </div>
+          <Activity size={22} />
+        </div>
+        {evaluation && (
+          <div className="evaluation-grid">
+            <EvaluationMetric label="Labeled decisions" value={evaluation.labeled_decisions} />
+            <EvaluationMetric label="Confirmed fraud" value={evaluation.confirmed_fraud} />
+            <EvaluationMetric label="False positives" value={evaluation.false_positives} />
+            <EvaluationMetric label="Precision" value={`${evaluation.precision}%`} />
+            <EvaluationMetric label="Profiles learning" value={evaluation.profiles_learning} />
+            <EvaluationMetric label="Trusted events learned" value={evaluation.trusted_events_learned} />
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function NumberSetting({ label, value, step = 1, onChange, disabled }: { label: string; value: number; step?: number; onChange: (value: number) => void; disabled: boolean }) {
+  return (
+    <label>
+      <span>{label}</span>
+      <input type="number" value={value} step={step} min={0} onChange={(event) => onChange(Number(event.target.value))} disabled={disabled} />
+    </label>
+  );
+}
+
+function EvaluationMetric({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div>
+      <span>{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }

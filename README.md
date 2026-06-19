@@ -316,6 +316,29 @@ Response:
 
 Every request is stored as a risk decision. Medium, high, and critical decisions also create dashboard alerts and investigation cases.
 
+## Behavioral Intelligence
+
+Boujuron maintains organization-scoped, long-term profiles for every user:
+
+- Incremental average transaction amount
+- Trusted device fingerprints
+- Trusted location history
+- Normal activity-hour distribution
+- Transaction and login velocity windows
+- Total and trusted profile event counts
+
+Behavioral scoring begins after the configured minimum number of trusted events. This avoids treating a new account's first activity as a mature baseline.
+
+Admins configure each organization's policy from **Settings → Organization Baselines**, including:
+
+- Amount spike multiplier
+- New device/location weights
+- Activity-hour sensitivity
+- Velocity window and event limits
+- Adaptive learning controls
+
+Low-risk events can update profiles automatically. High-risk activity never becomes normal automatically. When an analyst marks a case as `FALSE_POSITIVE`, Boujuron can safely learn that reviewed event. Model health and analyst-label precision are available under **Settings → Adaptive Learning Health**.
+
 ---
 
 # Security

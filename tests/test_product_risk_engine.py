@@ -31,6 +31,7 @@ def test_behavioral_amount_spike_adds_explainable_signal():
             "timestamp": "2026-06-19T12:00:00",
         },
         {
+            "trusted_event_count": 10,
             "average_amount": 20_000,
             "known_devices": ["iphone 15"],
             "known_locations": ["nigeria"],
@@ -58,6 +59,7 @@ def test_rooted_new_device_and_vpn_is_critical():
             "timestamp": "2026-06-19T12:00:00",
         },
         {
+            "trusted_event_count": 10,
             "known_devices": ["old-device-1"],
             "known_locations": ["nigeria"],
         },
@@ -88,3 +90,60 @@ def test_account_takeover_signals_lock_account():
     assert result["risk_level"] == "CRITICAL"
     assert result["action"] == "LOCK_ACCOUNT"
     assert result["recommendation"] == "LOCK_ACCOUNT_AND_ESCALATE"
+
+
+def test_organization_policy_controls_behavioral_signal_points():
+    result = analyze_event(
+        {
+            "user_id": "acct_policy",
+            "amount": 20_000,
+            "device_id": "new-device",
+            "device": "android",
+            "ip": "102.88.45.25",
+            "location": "kenya",
+            "timestamp": "2026-06-19T12:00:00",
+        },
+        {
+            "trusted_event_count": 10,
+            "average_amount": 15_000,
+            "known_devices": ["trusted-device"],
+            "known_locations": ["nigeria"],
+            "settings": {
+                "minimum_profile_events": 3,
+                "new_device_points": 35,
+                "new_location_points": 30,
+            },
+        },
+    )
+
+    points = {signal["label"]: signal["points"] for signal in result["signals"]}
+    assert points["New device"] == 35
+    assert points["New transaction location"] == 30
+
+
+def test_transaction_velocity_window_adds_risk():
+    result = analyze_event(
+        {
+            "user_id": "acct_velocity",
+            "amount": 5_000,
+            "device": "iphone",
+            "ip": "102.88.45.26",
+            "location": "nigeria",
+            "event_type": "transaction",
+            "timestamp": "2026-06-19T12:00:00",
+        },
+        {
+            "trusted_event_count": 6,
+            "transaction_velocity": 5,
+            "settings": {
+                "minimum_profile_events": 3,
+                "transaction_velocity_limit": 5,
+                "velocity_window_minutes": 10,
+                "velocity_points": 40,
+            },
+        },
+    )
+
+    assert "Transaction velocity spike" in result["reasons"]
+    assert result["risk_level"] == "MEDIUM"
+    assert result["action"] == "VERIFY"

@@ -58,6 +58,34 @@ export interface ClientApiKey {
   created_at: string;
 }
 
+export interface BehaviorSettings {
+  organization_id: number;
+  organization_name: string;
+  amount_spike_multiplier: number;
+  minimum_amount_delta: number;
+  new_device_points: number;
+  new_location_points: number;
+  unusual_hour_points: number;
+  velocity_window_minutes: number;
+  transaction_velocity_limit: number;
+  login_velocity_limit: number;
+  velocity_points: number;
+  minimum_profile_events: number;
+  adaptive_learning_enabled: boolean;
+  trusted_learning_max_score: number;
+}
+
+export interface BehaviorEvaluation {
+  labeled_decisions: number;
+  confirmed_fraud: number;
+  false_positives: number;
+  needs_review: number;
+  precision: number;
+  false_positive_rate: number;
+  profiles_learning: number;
+  trusted_events_learned: number;
+}
+
 export interface ScoreBreakdownItem {
   label: string;
   points: number;

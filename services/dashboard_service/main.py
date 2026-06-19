@@ -27,6 +27,9 @@ from services.dashboard_service.schemas import (
     AuthUserResponse,
     ApiKeyCreateRequest,
     ApiKeyResponse,
+    BehaviorEvaluationResponse,
+    BehaviorSettingsResponse,
+    BehaviorSettingsUpdate,
     AnalystPerformanceResponse,
     AnalyticsOverviewResponse,
     CaseDetailResponse,
@@ -105,7 +108,72 @@ def get_db():
     return conn, conn.cursor()
 
 
+def ensure_organization_tables(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS organizations (
+            id SERIAL PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            slug TEXT UNIQUE NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        INSERT INTO organizations (name, slug)
+        VALUES ('Boujuron', 'boujuron')
+        ON CONFLICT (slug) DO NOTHING
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS organization_risk_settings (
+            organization_id INTEGER PRIMARY KEY,
+            amount_spike_multiplier NUMERIC DEFAULT 5,
+            minimum_amount_delta NUMERIC DEFAULT 100000,
+            new_device_points INTEGER DEFAULT 25,
+            new_location_points INTEGER DEFAULT 20,
+            unusual_hour_points INTEGER DEFAULT 20,
+            velocity_window_minutes INTEGER DEFAULT 10,
+            transaction_velocity_limit INTEGER DEFAULT 5,
+            login_velocity_limit INTEGER DEFAULT 8,
+            velocity_points INTEGER DEFAULT 30,
+            minimum_profile_events INTEGER DEFAULT 3,
+            adaptive_learning_enabled BOOLEAN DEFAULT TRUE,
+            trusted_learning_max_score INTEGER DEFAULT 39,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        INSERT INTO organization_risk_settings (organization_id)
+        SELECT id FROM organizations WHERE slug = 'boujuron'
+        ON CONFLICT (organization_id) DO NOTHING
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS behavioral_profiles (
+            organization_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            event_count INTEGER DEFAULT 0,
+            trusted_event_count INTEGER DEFAULT 0,
+            amount_count INTEGER DEFAULT 0,
+            amount_mean NUMERIC DEFAULT 0,
+            amount_m2 NUMERIC DEFAULT 0,
+            known_devices JSONB DEFAULT '[]'::jsonb,
+            known_locations JSONB DEFAULT '[]'::jsonb,
+            hour_histogram JSONB DEFAULT '{}'::jsonb,
+            first_seen_at TIMESTAMP,
+            last_seen_at TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (organization_id, user_id)
+        )
+    """)
+
+
+def default_organization_id(cursor) -> int:
+    ensure_organization_tables(cursor)
+    cursor.execute("SELECT id FROM organizations WHERE slug = 'boujuron'")
+    return cursor.fetchone()[0]
+
+
 def ensure_auth_tables(cursor):
+    ensure_organization_tables(cursor)
+    organization_id = default_organization_id(cursor)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS app_users (
             id SERIAL PRIMARY KEY,
@@ -116,6 +184,8 @@ def ensure_auth_tables(cursor):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cursor.execute("ALTER TABLE app_users ADD COLUMN IF NOT EXISTS organization_id INTEGER")
+    cursor.execute("UPDATE app_users SET organization_id = %s WHERE organization_id IS NULL", (organization_id,))
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS password_reset_tokens (
             id SERIAL PRIMARY KEY,
@@ -151,6 +221,8 @@ def ensure_auth_tables(cursor):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cursor.execute("ALTER TABLE client_api_keys ADD COLUMN IF NOT EXISTS organization_id INTEGER")
+    cursor.execute("UPDATE client_api_keys SET organization_id = %s WHERE organization_id IS NULL", (organization_id,))
 
 
 def ensure_event_table(cursor):
@@ -169,6 +241,7 @@ def ensure_event_table(cursor):
         )
     """)
     for column_name, column_type in (
+        ("organization_id", "INTEGER"),
         ("transaction_id", "TEXT"),
         ("amount", "NUMERIC"),
         ("location", "TEXT"),
@@ -203,10 +276,17 @@ def ensure_risk_decision_table(cursor):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    cursor.execute("""
-        ALTER TABLE risk_decisions
-        ADD COLUMN IF NOT EXISTS recommendation TEXT
-    """)
+    for column_name, column_type in (
+        ("organization_id", "INTEGER"),
+        ("recommendation", "TEXT"),
+        ("analyst_feedback", "TEXT"),
+        ("feedback_at", "TIMESTAMP"),
+        ("learned", "BOOLEAN DEFAULT FALSE"),
+    ):
+        cursor.execute(f"""
+            ALTER TABLE risk_decisions
+            ADD COLUMN IF NOT EXISTS {column_name} {column_type}
+        """)
 
 
 def ensure_fraud_alert_table(cursor):
@@ -270,6 +350,8 @@ def ensure_case_tables(cursor):
 
 def ensure_fraud_alert_columns(cursor):
     for column_name, column_type in (
+        ("organization_id", "INTEGER"),
+        ("risk_decision_id", "INTEGER"),
         ("recommended_action", "TEXT"),
         ("confidence", "NUMERIC"),
         ("signals_triggered", "INTEGER"),
@@ -490,12 +572,12 @@ def get_current_user(authorization: str | None = Header(default=None)) -> AuthUs
     payload = decode_token(authorization.removeprefix("Bearer ").strip())
     conn, cursor = get_db()
     ensure_auth_tables(cursor)
-    cursor.execute("SELECT id, name, email, role FROM app_users WHERE id = %s", (payload["uid"],))
+    cursor.execute("SELECT id, name, email, role, organization_id FROM app_users WHERE id = %s", (payload["uid"],))
     row = cursor.fetchone()
     conn.close()
     if not row:
         raise HTTPException(status_code=401, detail="User no longer exists")
-    return AuthUserResponse(id=row[0], name=row[1], email=row[2], role=row[3])
+    return AuthUserResponse(id=row[0], name=row[1], email=row[2], role=row[3], organization_id=row[4])
 
 
 def require_admin(current_user: AuthUserResponse):
@@ -515,7 +597,7 @@ def authenticate_risk_client(
         conn, cursor = get_db()
         ensure_auth_tables(cursor)
         cursor.execute("""
-            SELECT id, name, key_prefix
+        SELECT id, name, key_prefix, organization_id
             FROM client_api_keys
             WHERE key_hash = %s AND active = TRUE
         """, (hash_api_key(x_api_key.strip()),))
@@ -526,10 +608,16 @@ def authenticate_risk_client(
         cursor.execute("UPDATE client_api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE id = %s", (row[0],))
         conn.commit()
         conn.close()
-        return {"type": "api_key", "id": row[0], "name": row[1], "prefix": row[2]}
+        return {"type": "api_key", "id": row[0], "name": row[1], "prefix": row[2], "organization_id": row[3]}
 
     user = get_current_user(authorization)
-    return {"type": "user", "id": user.id, "name": user.name, "role": user.role}
+    return {
+        "type": "user",
+        "id": user.id,
+        "name": user.name,
+        "role": user.role,
+        "organization_id": user.organization_id,
+    }
 
 
 def api_key_response(row, api_key: str | None = None) -> ApiKeyResponse:
@@ -545,34 +633,217 @@ def api_key_response(row, api_key: str | None = None) -> ApiKeyResponse:
     )
 
 
-def behavioral_context(cursor, user_id: str) -> dict:
-    ensure_event_table(cursor)
+def behavior_settings(cursor, organization_id: int) -> dict:
+    ensure_organization_tables(cursor)
+    cursor.execute("""
+        INSERT INTO organization_risk_settings (organization_id)
+        VALUES (%s)
+        ON CONFLICT (organization_id) DO NOTHING
+    """, (organization_id,))
     cursor.execute("""
         SELECT
-            COALESCE(AVG(amount), 0),
-            COALESCE(ARRAY_AGG(DISTINCT LOWER(NULLIF(device_id, ''))) FILTER (WHERE device_id IS NOT NULL AND device_id <> ''), '{}'),
-            COALESCE(ARRAY_AGG(DISTINCT LOWER(NULLIF(device_type, ''))) FILTER (WHERE device_type IS NOT NULL AND device_type <> ''), '{}'),
-            COALESCE(ARRAY_AGG(DISTINCT LOWER(NULLIF(location, ''))) FILTER (WHERE location IS NOT NULL AND location <> ''), '{}'),
-            MIN(EXTRACT(HOUR FROM timestamp)),
-            MAX(EXTRACT(HOUR FROM timestamp))
-        FROM (
-            SELECT amount, device_id, device_type, location, timestamp
-            FROM events
-            WHERE user_id = %s
-            ORDER BY timestamp DESC NULLS LAST, id DESC
-            LIMIT 100
-        ) history
-    """, (user_id,))
+            amount_spike_multiplier,
+            minimum_amount_delta,
+            new_device_points,
+            new_location_points,
+            unusual_hour_points,
+            velocity_window_minutes,
+            transaction_velocity_limit,
+            login_velocity_limit,
+            velocity_points,
+            minimum_profile_events,
+            adaptive_learning_enabled,
+            trusted_learning_max_score
+        FROM organization_risk_settings
+        WHERE organization_id = %s
+    """, (organization_id,))
     row = cursor.fetchone()
-    device_ids = list(row[1] or [])
-    device_types = list(row[2] or [])
+    keys = (
+        "amount_spike_multiplier",
+        "minimum_amount_delta",
+        "new_device_points",
+        "new_location_points",
+        "unusual_hour_points",
+        "velocity_window_minutes",
+        "transaction_velocity_limit",
+        "login_velocity_limit",
+        "velocity_points",
+        "minimum_profile_events",
+        "adaptive_learning_enabled",
+        "trusted_learning_max_score",
+    )
+    values = dict(zip(keys, row))
+    values["amount_spike_multiplier"] = float(values["amount_spike_multiplier"])
+    values["minimum_amount_delta"] = float(values["minimum_amount_delta"])
+    return values
+
+
+def usual_hours(hour_histogram: dict) -> tuple[int | None, int | None]:
+    populated = sorted(int(hour) for hour, count in hour_histogram.items() if int(count) > 0)
+    if not populated:
+        return None, None
+    weighted_total = sum(int(hour) * int(hour_histogram[str(hour)]) for hour in populated)
+    count = sum(int(hour_histogram[str(hour)]) for hour in populated)
+    center = round(weighted_total / count)
+    return max(center - 3, 0), min(center + 3, 23)
+
+
+def behavioral_context(cursor, organization_id: int, user_id: str, event_timestamp: str) -> dict:
+    ensure_organization_tables(cursor)
+    ensure_event_table(cursor)
+    settings_data = behavior_settings(cursor, organization_id)
+    cursor.execute("""
+        SELECT trusted_event_count, amount_mean, known_devices, known_locations, hour_histogram
+        FROM behavioral_profiles
+        WHERE organization_id = %s AND user_id = %s
+    """, (organization_id, user_id))
+    profile = cursor.fetchone()
+
+    if profile:
+        trusted_event_count = profile[0] or 0
+        average_amount = float(profile[1] or 0)
+        known_devices = list(profile[2] or [])
+        known_locations = list(profile[3] or [])
+        hour_histogram = profile[4] or {}
+    else:
+        cursor.execute("""
+            SELECT
+                COUNT(*),
+                COALESCE(AVG(amount), 0),
+                COALESCE(ARRAY_AGG(DISTINCT LOWER(COALESCE(NULLIF(device_id, ''), NULLIF(device_type, ''))))
+                    FILTER (WHERE COALESCE(NULLIF(device_id, ''), NULLIF(device_type, '')) IS NOT NULL), '{}'),
+                COALESCE(ARRAY_AGG(DISTINCT LOWER(NULLIF(location, '')))
+                    FILTER (WHERE location IS NOT NULL AND location <> ''), '{}')
+            FROM events
+            WHERE user_id = %s AND (organization_id = %s OR organization_id IS NULL)
+        """, (user_id, organization_id))
+        history = cursor.fetchone()
+        trusted_event_count = history[0] or 0
+        average_amount = float(history[1] or 0)
+        known_devices = list(history[2] or [])
+        known_locations = list(history[3] or [])
+        hour_histogram = {}
+        if trusted_event_count:
+            cursor.execute("""
+                INSERT INTO behavioral_profiles (
+                    organization_id, user_id, event_count, trusted_event_count,
+                    amount_count, amount_mean, known_devices, known_locations,
+                    hour_histogram, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, '{}'::jsonb, CURRENT_TIMESTAMP)
+                ON CONFLICT (organization_id, user_id) DO NOTHING
+            """, (
+                organization_id,
+                user_id,
+                trusted_event_count,
+                trusted_event_count,
+                trusted_event_count,
+                average_amount,
+                Json(known_devices),
+                Json(known_locations),
+            ))
+
+    usual_start, usual_end = usual_hours(hour_histogram)
+    timestamp = datetime.fromisoformat(event_timestamp.replace("Z", "+00:00")).replace(tzinfo=None)
+    window_start = timestamp - timedelta(minutes=int(settings_data["velocity_window_minutes"]))
+    cursor.execute("""
+        SELECT
+            COUNT(*) FILTER (WHERE LOWER(event_type) IN ('transaction', 'large_transfer', 'transfer', 'payment')),
+            COUNT(*) FILTER (WHERE LOWER(event_type) IN ('login', 'multiple_failed_logins'))
+        FROM events
+        WHERE user_id = %s
+          AND (organization_id = %s OR organization_id IS NULL)
+          AND timestamp >= %s
+          AND timestamp <= %s
+    """, (user_id, organization_id, window_start, timestamp))
+    velocity = cursor.fetchone()
     return {
-        "average_amount": float(row[0] or 0),
-        "known_devices": list(dict.fromkeys(device_ids + device_types)),
-        "known_locations": list(row[3] or []),
-        "usual_hour_start": int(row[4]) if row[4] is not None else None,
-        "usual_hour_end": int(row[5]) if row[5] is not None else None,
+        "trusted_event_count": trusted_event_count,
+        "average_amount": average_amount,
+        "known_devices": known_devices,
+        "known_locations": known_locations,
+        "usual_hour_start": usual_start,
+        "usual_hour_end": usual_end,
+        "transaction_velocity": velocity[0] or 0,
+        "login_velocity": velocity[1] or 0,
+        "settings": settings_data,
     }
+
+
+def update_behavior_profile(
+    cursor,
+    organization_id: int,
+    user_id: str,
+    event: dict,
+    trusted: bool,
+    increment_event: bool = True,
+):
+    ensure_organization_tables(cursor)
+    cursor.execute("""
+        SELECT event_count, trusted_event_count, amount_count, amount_mean, amount_m2,
+               known_devices, known_locations, hour_histogram, first_seen_at
+        FROM behavioral_profiles
+        WHERE organization_id = %s AND user_id = %s
+    """, (organization_id, user_id))
+    row = cursor.fetchone()
+    now = datetime.fromisoformat(str(event["timestamp"]).replace("Z", "+00:00")).replace(tzinfo=None)
+    event_count = (row[0] if row else 0) + (1 if increment_event else 0)
+    trusted_count = (row[1] if row else 0) + (1 if trusted else 0)
+    amount_count = row[2] if row else 0
+    amount_mean = float(row[3] or 0) if row else 0
+    amount_m2 = float(row[4] or 0) if row else 0
+    known_devices = list(row[5] or []) if row else []
+    known_locations = list(row[6] or []) if row else []
+    hour_histogram = dict(row[7] or {}) if row else {}
+    first_seen_at = row[8] if row else now
+
+    if trusted:
+        amount = float(event.get("amount") or 0)
+        amount_count += 1
+        delta = amount - amount_mean
+        amount_mean += delta / amount_count
+        amount_m2 += delta * (amount - amount_mean)
+        device = str(event.get("device_id") or event.get("device_type") or event.get("device") or "").lower().strip()
+        location = str(event.get("location") or "").lower().strip()
+        if device and device not in known_devices:
+            known_devices = (known_devices + [device])[-100:]
+        if location and location not in known_locations:
+            known_locations = (known_locations + [location])[-100:]
+        hour = str(now.hour)
+        hour_histogram[hour] = int(hour_histogram.get(hour, 0)) + 1
+
+    cursor.execute("""
+        INSERT INTO behavioral_profiles (
+            organization_id, user_id, event_count, trusted_event_count, amount_count,
+            amount_mean, amount_m2, known_devices, known_locations, hour_histogram,
+            first_seen_at, last_seen_at, updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+        ON CONFLICT (organization_id, user_id) DO UPDATE SET
+            event_count = EXCLUDED.event_count,
+            trusted_event_count = EXCLUDED.trusted_event_count,
+            amount_count = EXCLUDED.amount_count,
+            amount_mean = EXCLUDED.amount_mean,
+            amount_m2 = EXCLUDED.amount_m2,
+            known_devices = EXCLUDED.known_devices,
+            known_locations = EXCLUDED.known_locations,
+            hour_histogram = EXCLUDED.hour_histogram,
+            last_seen_at = EXCLUDED.last_seen_at,
+            updated_at = CURRENT_TIMESTAMP
+    """, (
+        organization_id,
+        user_id,
+        event_count,
+        trusted_count,
+        amount_count,
+        amount_mean,
+        amount_m2,
+        Json(known_devices),
+        Json(known_locations),
+        Json(hour_histogram),
+        first_seen_at,
+        now,
+    ))
 
 
 def parse_reasons(reason: str | None) -> list[str]:
@@ -761,10 +1032,16 @@ def create_api_key(payload: ApiKeyCreateRequest, current_user: AuthUserResponse 
     conn, cursor = get_db()
     ensure_auth_tables(cursor)
     cursor.execute("""
-        INSERT INTO client_api_keys (name, key_prefix, key_hash, created_by)
-        VALUES (%s, %s, %s, %s)
+        INSERT INTO client_api_keys (name, key_prefix, key_hash, created_by, organization_id)
+        VALUES (%s, %s, %s, %s, %s)
         RETURNING id, name, key_prefix, active, last_used_at, created_at
-    """, (payload.name.strip(), prefix, hash_api_key(raw_key), current_user.id))
+    """, (
+        payload.name.strip(),
+        prefix,
+        hash_api_key(raw_key),
+        current_user.id,
+        current_user.organization_id or default_organization_id(cursor),
+    ))
     row = cursor.fetchone()
     conn.commit()
     conn.close()
@@ -801,6 +1078,89 @@ def revoke_api_key(key_id: int, current_user: AuthUserResponse = Depends(get_cur
     return {"message": "API key revoked"}
 
 
+def behavior_settings_response(cursor, organization_id: int) -> BehaviorSettingsResponse:
+    settings_data = behavior_settings(cursor, organization_id)
+    cursor.execute("SELECT name FROM organizations WHERE id = %s", (organization_id,))
+    organization = cursor.fetchone()
+    return BehaviorSettingsResponse(
+        organization_id=organization_id,
+        organization_name=organization[0] if organization else "Organization",
+        **settings_data,
+    )
+
+
+@app.get("/behavior/settings", response_model=BehaviorSettingsResponse)
+def get_behavior_settings(current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    response = behavior_settings_response(cursor, organization_id)
+    conn.commit()
+    conn.close()
+    return response
+
+
+@app.patch("/behavior/settings", response_model=BehaviorSettingsResponse)
+def update_behavior_settings(
+    payload: BehaviorSettingsUpdate,
+    current_user: AuthUserResponse = Depends(get_current_user),
+):
+    require_admin(current_user)
+    changes = payload.model_dump(exclude_unset=True)
+    conn, cursor = get_db()
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    behavior_settings(cursor, organization_id)
+    if changes:
+        clauses = [f"{field} = %s" for field in changes]
+        values = list(changes.values()) + [organization_id]
+        cursor.execute(f"""
+            UPDATE organization_risk_settings
+            SET {', '.join(clauses)}, updated_at = CURRENT_TIMESTAMP
+            WHERE organization_id = %s
+        """, values)
+    response = behavior_settings_response(cursor, organization_id)
+    conn.commit()
+    conn.close()
+    return response
+
+
+@app.get("/behavior/evaluation", response_model=BehaviorEvaluationResponse)
+def behavior_evaluation(current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    ensure_risk_decision_table(cursor)
+    ensure_organization_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    cursor.execute("""
+        SELECT
+            COUNT(*) FILTER (WHERE analyst_feedback IS NOT NULL),
+            COUNT(*) FILTER (WHERE analyst_feedback = 'TRUE_FRAUD'),
+            COUNT(*) FILTER (WHERE analyst_feedback = 'FALSE_POSITIVE'),
+            COUNT(*) FILTER (WHERE analyst_feedback = 'NEEDS_REVIEW')
+        FROM risk_decisions
+        WHERE organization_id = %s
+    """, (organization_id,))
+    labeled, confirmed, false_positive, needs_review = cursor.fetchone()
+    cursor.execute("""
+        SELECT COUNT(*), COALESCE(SUM(trusted_event_count), 0)
+        FROM behavioral_profiles
+        WHERE organization_id = %s AND trusted_event_count > 0
+    """, (organization_id,))
+    profiles_learning, trusted_events = cursor.fetchone()
+    conn.close()
+    denominator = confirmed + false_positive
+    precision = round((confirmed / denominator) * 100, 1) if denominator else 0
+    false_positive_rate = round((false_positive / denominator) * 100, 1) if denominator else 0
+    return BehaviorEvaluationResponse(
+        labeled_decisions=labeled,
+        confirmed_fraud=confirmed,
+        false_positives=false_positive,
+        needs_review=needs_review,
+        precision=precision,
+        false_positive_rate=false_positive_rate,
+        profiles_learning=profiles_learning,
+        trusted_events_learned=trusted_events,
+    )
+
+
 @app.post("/auth/register", response_model=AuthTokenResponse)
 def register(payload: AuthRegisterRequest):
     if len(payload.password) < 8:
@@ -831,16 +1191,17 @@ def register(payload: AuthRegisterRequest):
         raise HTTPException(status_code=403, detail="Invite token is not valid for this email")
 
     role = invite_role if invite_role in ALLOWED_ROLES else "Read-Only Auditor"
+    organization_id = default_organization_id(cursor)
     cursor.execute("SELECT id FROM app_users WHERE email = %s", (payload.email.lower(),))
     if cursor.fetchone():
         conn.close()
         raise HTTPException(status_code=409, detail="Email is already registered")
 
     cursor.execute("""
-        INSERT INTO app_users (name, email, password_hash, role)
-        VALUES (%s, %s, %s, %s)
-        RETURNING id, name, email, role
-    """, (payload.name.strip(), payload.email.lower(), hash_password(payload.password), role))
+        INSERT INTO app_users (name, email, password_hash, role, organization_id)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING id, name, email, role, organization_id
+    """, (payload.name.strip(), payload.email.lower(), hash_password(payload.password), role, organization_id))
     row = cursor.fetchone()
     cursor.execute("""
         UPDATE invite_tokens
@@ -849,7 +1210,7 @@ def register(payload: AuthRegisterRequest):
     """, (row[0], invite_id))
     conn.commit()
     conn.close()
-    user = AuthUserResponse(id=row[0], name=row[1], email=row[2], role=row[3])
+    user = AuthUserResponse(id=row[0], name=row[1], email=row[2], role=row[3], organization_id=row[4])
     return AuthTokenResponse(access_token=create_token(user), user=user)
 
 
@@ -857,12 +1218,12 @@ def register(payload: AuthRegisterRequest):
 def login(payload: AuthLoginRequest):
     conn, cursor = get_db()
     ensure_auth_tables(cursor)
-    cursor.execute("SELECT id, name, email, role, password_hash FROM app_users WHERE email = %s", (payload.email.lower(),))
+    cursor.execute("SELECT id, name, email, role, password_hash, organization_id FROM app_users WHERE email = %s", (payload.email.lower(),))
     row = cursor.fetchone()
     conn.close()
     if not row or not verify_password(payload.password, row[4]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    user = AuthUserResponse(id=row[0], name=row[1], email=row[2], role=row[3])
+    user = AuthUserResponse(id=row[0], name=row[1], email=row[2], role=row[3], organization_id=row[5])
     return AuthTokenResponse(access_token=create_token(user), user=user)
 
 
@@ -976,6 +1337,7 @@ async def score_risk(
 
     conn, cursor = get_db()
     prepare_analytics_tables(cursor)
+    organization_id = client.get("organization_id") or default_organization_id(cursor)
 
     if idempotency_key:
         cursor.execute("""
@@ -989,8 +1351,13 @@ async def score_risk(
             conn.close()
             return risk_response_from_row(existing)
 
-    behavior = behavioral_context(cursor, payload.user_id)
+    behavior = behavioral_context(cursor, organization_id, payload.user_id, event["timestamp"])
     result = analyze_event(event, behavior)
+    settings_data = behavior["settings"]
+    trusted_for_learning = bool(
+        settings_data["adaptive_learning_enabled"]
+        and result["risk_score"] <= int(settings_data["trusted_learning_max_score"])
+    )
     metadata = {
         **payload.metadata,
         "is_rooted": payload.is_rooted,
@@ -1003,11 +1370,12 @@ async def score_risk(
 
     cursor.execute("""
         INSERT INTO events (
-            transaction_id, user_id, amount, location, event_type, device_type,
+            organization_id, transaction_id, user_id, amount, location, event_type, device_type,
             device_id, network, ip, timestamp, metadata, source
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
+        organization_id,
         transaction_id,
         payload.user_id,
         payload.amount,
@@ -1024,13 +1392,15 @@ async def score_risk(
 
     cursor.execute("""
         INSERT INTO risk_decisions (
-            transaction_id, idempotency_key, user_id, risk_score, risk_level,
-            action, recommendation, confidence, reasons, signals, behavioral_match, request_payload, source
+            organization_id, transaction_id, idempotency_key, user_id, risk_score, risk_level,
+            action, recommendation, confidence, reasons, signals, behavioral_match,
+            request_payload, source, learned
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id, transaction_id, user_id, risk_score, risk_level, action,
                   recommendation, confidence, reasons, signals, behavioral_match, created_at
     """, (
+        organization_id,
         transaction_id,
         idempotency_key,
         payload.user_id,
@@ -1044,6 +1414,7 @@ async def score_risk(
         result["behavioral_match"],
         Json(event),
         source,
+        trusted_for_learning,
     ))
     decision_row = cursor.fetchone()
 
@@ -1051,12 +1422,14 @@ async def score_risk(
     if result["risk_score"] >= 40:
         cursor.execute("""
             INSERT INTO fraud_alerts (
-                user_id, reason, risk_score, risk_level, timestamp,
+                organization_id, risk_decision_id, user_id, reason, risk_score, risk_level, timestamp,
                 recommended_action, confidence, signals_triggered, behavioral_match
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
+            organization_id,
+            decision_row[0],
             payload.user_id,
             result["reason"],
             result["risk_score"],
@@ -1076,12 +1449,19 @@ async def score_risk(
             "risk_score": str(result["risk_score"]),
             "risk_level": result["risk_level"],
             "timestamp": event["timestamp"],
-            "recommended_action": result["action"],
+            "recommended_action": result["recommendation"],
             "confidence": float(result["confidence"]),
             "signals_triggered": len(result["signals"]),
             "behavioral_match": result["behavioral_match"],
         }
 
+    update_behavior_profile(
+        cursor,
+        organization_id,
+        payload.user_id,
+        event,
+        trusted=trusted_for_learning,
+    )
     conn.commit()
     conn.close()
 
@@ -1563,8 +1943,10 @@ def update_case(case_id: int, payload: CaseUpdateRequest, current_user: AuthUser
 
     conn, cursor = get_db()
     ensure_case_tables(cursor)
+    ensure_fraud_alert_table(cursor)
+    ensure_risk_decision_table(cursor)
     cursor.execute("""
-        SELECT assigned_to, status, priority, analyst_feedback, decision, potential_loss, actual_loss
+        SELECT assigned_to, status, priority, analyst_feedback, decision, potential_loss, actual_loss, fraud_alert_id
         FROM cases
         WHERE id = %s
     """, (case_id,))
@@ -1582,6 +1964,7 @@ def update_case(case_id: int, payload: CaseUpdateRequest, current_user: AuthUser
         "potential_loss": float(before[5]) if before[5] is not None else None,
         "actual_loss": float(before[6]) if before[6] is not None else None,
     }
+    fraud_alert_id = before[7]
 
     set_clauses = ["updated_at = CURRENT_TIMESTAMP"]
     params = []
@@ -1608,6 +1991,33 @@ def update_case(case_id: int, payload: CaseUpdateRequest, current_user: AuthUser
     for field, value in changes.items():
         if current_values.get(field) != value:
             timeline(cursor, case_id, field.upper(), f"{labels[field]} changed to {value or 'Unassigned'}", actor)
+
+    feedback = changes.get("analyst_feedback")
+    if feedback and fraud_alert_id:
+        cursor.execute("""
+            SELECT d.id, d.organization_id, d.user_id, d.request_payload, d.learned
+            FROM fraud_alerts f
+            JOIN risk_decisions d ON d.id = f.risk_decision_id
+            WHERE f.id = %s
+        """, (fraud_alert_id,))
+        decision_row = cursor.fetchone()
+        if decision_row:
+            decision_id, organization_id, user_id, request_payload, learned = decision_row
+            cursor.execute("""
+                UPDATE risk_decisions
+                SET analyst_feedback = %s, feedback_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (feedback, decision_id))
+            if feedback == "FALSE_POSITIVE" and not learned:
+                update_behavior_profile(
+                    cursor,
+                    organization_id or default_organization_id(cursor),
+                    user_id,
+                    request_payload,
+                    trusted=True,
+                    increment_event=False,
+                )
+                cursor.execute("UPDATE risk_decisions SET learned = TRUE WHERE id = %s", (decision_id,))
 
     conn.commit()
     conn.close()

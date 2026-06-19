@@ -4,6 +4,8 @@ import type {
   AnalyticsOverview,
   AuthResponse,
   AuthUser,
+  BehaviorEvaluation,
+  BehaviorSettings,
   CaseDetail,
   CaseSummary,
   CaseUpdate,
@@ -73,6 +75,21 @@ export async function getClientApiKeys() {
 
 export async function revokeClientApiKey(keyId: number) {
   await api.delete(`/api-keys/${keyId}`);
+}
+
+export async function getBehaviorSettings() {
+  const response = await api.get<BehaviorSettings>("/behavior/settings");
+  return response.data;
+}
+
+export async function updateBehaviorSettings(settings: Partial<BehaviorSettings>) {
+  const response = await api.patch<BehaviorSettings>("/behavior/settings", settings);
+  return response.data;
+}
+
+export async function getBehaviorEvaluation() {
+  const response = await api.get<BehaviorEvaluation>("/behavior/evaluation");
+  return response.data;
 }
 
 export async function forgotPassword(email: string) {

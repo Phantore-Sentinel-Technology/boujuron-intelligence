@@ -1347,7 +1347,8 @@ dd {
 }
 
 .case-tools select, .filter-select select, .case-control-panel select,
-.case-control-panel input, .note-form textarea, .invite-form input, .invite-form select, .api-key-form input {
+.case-control-panel input, .note-form textarea, .invite-form input, .invite-form select, .api-key-form input,
+.behavior-settings-form input {
   border: 1px solid #334155;
   border-radius: 8px;
   background: #0f172a;
@@ -1667,6 +1668,67 @@ dd {
   font-size: 13px;
 }
 
+.behavior-settings-form {
+  display: grid;
+  gap: 14px;
+}
+
+.behavior-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.behavior-settings-grid label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.behavior-settings-grid label span,
+.evaluation-grid span {
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.toggle-setting {
+  align-content: end;
+}
+
+.toggle-setting input {
+  width: 22px;
+  height: 22px;
+  accent-color: #0284c7;
+}
+
+.behavior-save {
+  justify-self: start;
+}
+
+.evaluation-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.evaluation-grid div {
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  padding: 14px;
+}
+
+.evaluation-grid span,
+.evaluation-grid strong {
+  display: block;
+}
+
+.evaluation-grid strong {
+  margin-top: 8px;
+  font-size: 24px;
+}
+
 :root[data-theme="light"] {
   color-scheme: light;
   background: #f8fafc;
@@ -1739,7 +1801,8 @@ dd {
 :root[data-theme="light"] .chip-list span,
 :root[data-theme="light"] .trend,
 :root[data-theme="light"] .invite-result,
-:root[data-theme="light"] .invite-row {
+:root[data-theme="light"] .invite-row,
+:root[data-theme="light"] .evaluation-grid div {
   background: #f8fafc;
   border-color: #cbd5e1;
   color: #0f172a;
@@ -1781,7 +1844,8 @@ dd {
 :root[data-theme="light"] .note-form textarea,
 :root[data-theme="light"] .invite-form input,
 :root[data-theme="light"] .invite-form select,
-:root[data-theme="light"] .api-key-form input {
+:root[data-theme="light"] .api-key-form input,
+:root[data-theme="light"] .behavior-settings-form input {
   background: #ffffff;
   border-color: #cbd5e1;
   color: #0f172a;
@@ -1816,6 +1880,11 @@ dd {
 :root[data-theme="light"] .invite-result span,
 :root[data-theme="light"] .invite-row span,
 :root[data-theme="light"] .auth-note {
+  color: #64748b;
+}
+
+:root[data-theme="light"] .behavior-settings-grid label span,
+:root[data-theme="light"] .evaluation-grid span {
   color: #64748b;
 }
 
@@ -2159,11 +2228,28 @@ dd {
     grid-template-columns: 1fr;
   }
 
+  .behavior-settings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .evaluation-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .invite-result span,
   .invite-result strong,
   .invite-result button {
     grid-column: auto;
     grid-row: auto;
+  }
+
+  .behavior-settings-grid,
+  .evaluation-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .behavior-save {
+    width: 100%;
   }
 
   .stat-card,
