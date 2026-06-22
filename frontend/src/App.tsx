@@ -15,6 +15,7 @@ import { ForgotPassword } from "./pages/ForgotPassword";
 import { Login } from "./pages/Login";
 import { Register } from "./pages/Register";
 import { ResetPassword } from "./pages/ResetPassword";
+import { DecisionLab } from "./pages/DecisionLab";
 import { useFraudAlerts } from "./hooks/useFraudAlerts";
 import { useAuth } from "./context/AuthContext";
 
@@ -50,6 +51,7 @@ function AuthenticatedApp() {
         <Route path="/history" element={<History />} />
         <Route path="/executive" element={<Executive />} />
         <Route path="/analytics" element={<Analytics alerts={fraud.alerts} stats={fraud.stats} />} />
+        <Route path="/decision-lab" element={<DecisionLab />} />
         <Route path="/alerts" element={<Alerts alerts={fraud.topAlerts} loading={fraud.loading} />} />
         <Route path="/cases" element={<Cases />} />
         <Route path="/cases/:caseId" element={<CaseDetail />} />

@@ -43,6 +43,7 @@ button, a, input, select, textarea {
   display: flex;
   flex-direction: column;
   gap: 28px;
+  overflow-y: auto;
 }
 
 .brand {
@@ -2013,6 +2014,154 @@ dd {
   font-size: 10px;
 }
 
+.lab-intro,
+.decision-result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.lab-intro p:not(.eyebrow) {
+  margin-top: 8px;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+
+.lab-workspace {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.42fr) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.scenario-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.scenario-option {
+  min-height: 86px;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #111827;
+  color: #e2e8f0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.scenario-option span {
+  color: #94a3b8;
+  line-height: 1.35;
+}
+
+.scenario-option.active {
+  border-color: #38bdf8;
+  background: #1e293b;
+}
+
+.scenario-console {
+  min-width: 0;
+}
+
+.event-preview,
+.decision-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.event-preview > div,
+.decision-summary-grid > div {
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+}
+
+.event-preview span,
+.decision-summary-grid span,
+.decision-score span {
+  display: block;
+  color: #94a3b8;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.event-preview strong,
+.decision-summary-grid strong {
+  display: block;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+
+.decision-result {
+  min-height: 240px;
+}
+
+.lab-empty {
+  min-height: 190px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.decision-score {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.decision-score > strong {
+  font-size: 42px;
+  line-height: 1;
+}
+
+.decision-summary-grid {
+  margin: 16px 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.decision-evidence {
+  display: grid;
+  gap: 8px;
+}
+
+.decision-evidence > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 11px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+}
+
+.decision-evidence strong,
+.decision-evidence span {
+  display: block;
+}
+
+.decision-evidence strong em {
+  color: #fbbf24;
+  font-style: normal;
+}
+
+.decision-evidence span {
+  margin-top: 3px;
+  color: #94a3b8;
+}
+
+.safe-decision {
+  color: #86efac;
+}
+
 .behavior-settings-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(150px, 1fr));
@@ -2174,6 +2323,20 @@ dd {
   background: #f8fafc;
   border-color: #cbd5e1;
   color: #0f172a;
+}
+
+:root[data-theme="light"] .scenario-option,
+:root[data-theme="light"] .event-preview > div,
+:root[data-theme="light"] .decision-summary-grid > div,
+:root[data-theme="light"] .decision-evidence > div {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .scenario-option.active {
+  border-color: #0284c7;
+  background: #e0f2fe;
 }
 
 :root[data-theme="light"] .case-command,
@@ -2571,6 +2734,22 @@ dd {
   .destination-form,
   .invoice-row {
     grid-template-columns: 1fr;
+  }
+
+  .lab-workspace,
+  .event-preview,
+  .decision-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lab-intro,
+  .decision-result-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .decision-score {
+    justify-items: start;
   }
 
   .consortium-control {

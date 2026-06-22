@@ -3583,8 +3583,14 @@ def monthly_pdf_report(current_user: AuthUserResponse = Depends(get_current_user
 
 
 @app.get("/ml-features")
-def get_features(limit: int = 50):
+def get_features(limit: int = 50, current_user: AuthUserResponse = Depends(get_current_user)):
+    require_admin(current_user)
     conn, cursor = get_db()
+    cursor.execute("SELECT slug FROM organizations WHERE id = %s", (current_user.organization_id,))
+    organization = cursor.fetchone()
+    if not organization or organization[0] != "boujuron":
+        conn.close()
+        raise HTTPException(status_code=403, detail="Platform administrator access required")
 
     cursor.execute("""
         SELECT user_id, num_devices, num_ips, total_requests, timestamp

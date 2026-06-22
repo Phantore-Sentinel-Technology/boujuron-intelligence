@@ -174,6 +174,37 @@ export interface DecisionRule {
   updated_at: string;
 }
 
+export interface RiskDecision {
+  decision_id: number;
+  transaction_id: string;
+  user_id: string;
+  risk_score: number;
+  risk_level: RiskLevel;
+  action: "ALLOW" | "CHALLENGE" | "BLOCK";
+  recommendation: string;
+  confidence: number;
+  reasons: string[];
+  signals: Array<{ category: string; label: string; points: number; evidence: string }>;
+  behavioral_match: boolean;
+  action_decision_id?: number | null;
+  matched_rules: string[];
+  device_intelligence?: {
+    fingerprint: string;
+    status: string;
+    trust_score: number;
+    is_new_device: boolean;
+    integrity_flags: string[];
+  } | null;
+  account_takeover?: {
+    detected: boolean;
+    score: number;
+    level: RiskLevel;
+    recommendation: string;
+    indicators: string[];
+  } | null;
+  created_at: string;
+}
+
 export interface ScoreBreakdownItem {
   label: string;
   points: number;

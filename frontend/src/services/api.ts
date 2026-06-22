@@ -22,6 +22,7 @@ import type {
   AlertDestination,
   ApiUsage,
   RuleCondition,
+  RiskDecision,
   RiskDistributionPoint,
   TrendPoint,
   UserRiskProfile,
@@ -191,6 +192,13 @@ export async function getCurrentUser() {
 export async function getFraudAlerts(limit = 100) {
   const response = await api.get<FraudAlert[]>("/fraud-alerts", {
     params: { limit }
+  });
+  return response.data;
+}
+
+export async function scoreRiskEvent(payload: Record<string, unknown>) {
+  const response = await api.post<RiskDecision>("/risk-score", payload, {
+    headers: { "Idempotency-Key": `decision-lab-${crypto.randomUUID()}` }
   });
   return response.data;
 }
