@@ -33,39 +33,20 @@ export function Executive() {
     let mounted = true;
 
     const loadExecutiveData = async () => {
-      try {
-        const overviewData = await getAnalyticsOverview();
-        if (mounted) setOverview(overviewData);
-      } catch {
-        // Keep the last successful values visible during brief free-tier API delays.
-      }
+      const results = await Promise.allSettled([
+        getAnalyticsOverview(),
+        getAnalyticsTrends(),
+        getRiskDistribution(),
+        getAnalystPerformance(),
+        getFraudHeatMap()
+      ]);
 
-      try {
-        const trendsData = await getAnalyticsTrends();
-        if (mounted) setTrends(trendsData);
-      } catch {
-        // Optional chart data retries on the next refresh cycle.
-      }
-
-      try {
-        const distributionData = await getRiskDistribution();
-        if (mounted) setRiskDistribution(distributionData);
-      } catch {
-        // Optional chart data retries on the next refresh cycle.
-      }
-
-      try {
-        const analystData = await getAnalystPerformance();
-        if (mounted) setAnalysts(analystData);
-      } catch {
-        // Optional chart data retries on the next refresh cycle.
-      }
-
-      try {
-        const heatData = await getFraudHeatMap();
-        if (mounted) setHeatMap(heatData);
-      } catch {
-        // Optional chart data retries on the next refresh cycle.
+      if (mounted) {
+        if (results[0].status === "fulfilled") setOverview(results[0].value);
+        if (results[1].status === "fulfilled") setTrends(results[1].value);
+        if (results[2].status === "fulfilled") setRiskDistribution(results[2].value);
+        if (results[3].status === "fulfilled") setAnalysts(results[3].value);
+        if (results[4].status === "fulfilled") setHeatMap(results[4].value);
       }
 
       if (mounted) setLoading(false);

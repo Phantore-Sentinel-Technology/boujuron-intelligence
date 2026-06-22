@@ -18,7 +18,6 @@ import {
   getAlertDestinations,
   getConsortiumSettings,
   getInvoices,
-  getInvites,
   getPortalUsage,
   rotateClientApiKey,
   revokeClientApiKey,
@@ -43,12 +42,10 @@ export function Settings() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<UserRole>("Read-Only Auditor");
   const [expiresInHours, setExpiresInHours] = useState(24);
-  const [invites, setInvites] = useState<InviteToken[]>([]);
   const [createdInvite, setCreatedInvite] = useState<InviteToken | null>(null);
   const [message, setMessage] = useState("");
   const [inviteError, setInviteError] = useState("");
   const [loadError, setLoadError] = useState("");
-  const [loadingInvites, setLoadingInvites] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [apiKeyName, setApiKeyName] = useState("");
   const [apiKeys, setApiKeys] = useState<ClientApiKey[]>([]);
@@ -94,11 +91,9 @@ export function Settings() {
         });
     }
 
-    setLoadingInvites(true);
     setLoadError("");
 
     Promise.all([
-      loadSetting("invitations", isAdmin ? getInvites() : Promise.resolve([]), setInvites),
       loadSetting("API keys", isAdmin ? getClientApiKeys() : Promise.resolve([]), setApiKeys),
       loadSetting("behavioral baselines", getBehaviorSettings(), setBehaviorSettings),
       loadSetting("adaptive learning health", getBehaviorEvaluation(), setEvaluation),
@@ -110,7 +105,6 @@ export function Settings() {
       loadSetting("fraud consortium", getConsortiumSettings(), setConsortium)
     ]).finally(() => {
       if (!mounted) return;
-      setLoadingInvites(false);
       if (failures.length > 0) {
         setLoadError(`Could not load: ${failures.join(", ")}. The other settings remain available.`);
       }
@@ -129,7 +123,6 @@ export function Settings() {
     try {
       const invite = await createInvite(email, role, expiresInHours);
       setCreatedInvite(invite);
-      setInvites((current) => [invite, ...current]);
       setEmail("");
       setMessage("Invite generated successfully.");
     } catch (error) {
@@ -426,23 +419,7 @@ export function Settings() {
               </div>
             )}
 
-            <div className="invite-list">
-              {invites.map((invite) => (
-                <div key={invite.id} className="invite-row">
-                  <div>
-                    <strong>{invite.email}</strong>
-                    <span>{invite.role} / expires {formatTime(invite.expires_at)}</span>
-                  </div>
-                  <span className={`invite-status ${invite.used_at ? "used" : "active"}`}>{invite.used_at ? "Used" : "Active"}</span>
-                  <button className="small-button" onClick={() => copyInvite(invite.invite_url)}>
-                    <Copy size={15} />
-                    Copy
-                  </button>
-                </div>
-              ))}
-              {loadingInvites && <div className="empty-state slim">Loading invites...</div>}
-              {!loadingInvites && invites.length === 0 && <div className="empty-state slim">No invites generated yet.</div>}
-            </div>
+            <p className="settings-copy">The complete invitation audit trail is available on the History page.</p>
           </>
         )}
       </section>

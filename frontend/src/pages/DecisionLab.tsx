@@ -10,8 +10,8 @@ const scenarios = [
     name: "Normal Airtime",
     summary: "Familiar mobile activity with a small purchase.",
     payload: {
-      user_id: "maripay_customer_101", event_type: "airtime_purchase", amount: 2000,
-      device_type: "iphone", device_id: "maripay-iphone-101", platform: "ios",
+      user_id: "customer_101", event_type: "airtime_purchase", amount: 2000,
+      device_type: "iphone", device_id: "iphone-101", platform: "ios",
       operating_system: "iOS 18", ip: "102.88.45.101", location: "lagos, nigeria", network: "MOBILE"
     }
   },
@@ -20,8 +20,8 @@ const scenarios = [
     name: "VPN Transfer",
     summary: "Higher-value wallet transfer routed through a VPN.",
     payload: {
-      user_id: "maripay_customer_202", event_type: "wallet_transfer", amount: 180000,
-      device_type: "android", device_id: "maripay-android-202", platform: "android",
+      user_id: "customer_102", event_type: "wallet_transfer", amount: 180000,
+      device_type: "android", device_id: "android-102", platform: "android",
       operating_system: "Android 15", ip: "197.210.10.202", location: "abuja, nigeria", network: "VPN"
     }
   },
@@ -30,8 +30,8 @@ const scenarios = [
     name: "Account Takeover",
     summary: "SIM change, failed logins, rooted device and large transfer.",
     payload: {
-      user_id: "maripay_customer_303", event_type: "wallet_transfer", amount: 750000,
-      device_type: "android", device_id: "unknown-android-303", platform: "android",
+      user_id: "customer_103", event_type: "wallet_transfer", amount: 750000,
+      device_type: "android", device_id: "unknown-android-103", platform: "android",
       operating_system: "Android 14", ip: "45.90.12.10", location: "russia", network: "VPN",
       password_changed_recently: true, sim_swap_detected: true, failed_login_count: 8, is_rooted: true
     }
@@ -41,8 +41,8 @@ const scenarios = [
     name: "Manipulated Device",
     summary: "Emulator, browser tampering, failed attestation and TOR.",
     payload: {
-      user_id: "maripay_customer_404", event_type: "login", amount: 0,
-      device_type: "android emulator", device_id: "emulator-404", platform: "android",
+      user_id: "customer_104", event_type: "login", amount: 0,
+      device_type: "android emulator", device_id: "emulator-104", platform: "android",
       operating_system: "Android 14", browser: "Chrome", ip: "45.90.12.10",
       location: "unknown", network: "TOR", is_emulator: true,
       browser_tampering: true, device_attestation: "FAILED"
@@ -78,7 +78,7 @@ export function DecisionLab() {
       <section className="insight-panel lab-intro">
         <div>
           <p className="eyebrow">Controlled fraud simulation</p>
-          <h2>MariPay Decision Lab</h2>
+          <h2>Boujuron Decision Lab</h2>
           <p>Run a realistic wallet event through Boujuron and inspect the decision before value leaves the account.</p>
         </div>
         <FlaskConical size={28} />
