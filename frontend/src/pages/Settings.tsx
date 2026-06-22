@@ -1,3 +1,4 @@
+import axios from "axios";
 import { FormEvent, useEffect, useState } from "react";
 import { Activity, BellRing, Building2, Code2, Copy, KeyRound, Plus, RefreshCw, ShieldCheck, SlidersHorizontal, Trash2 } from "lucide-react";
 import type { AlertDestination, ApiUsage, BehaviorEvaluation, BehaviorSettings, ClientApiKey, ConsortiumSettings, DecisionRule, Invoice, InviteToken, Organization, RuleCondition, RuleField, UserRole } from "../types";
@@ -45,6 +46,8 @@ export function Settings() {
   const [invites, setInvites] = useState<InviteToken[]>([]);
   const [createdInvite, setCreatedInvite] = useState<InviteToken | null>(null);
   const [message, setMessage] = useState("");
+  const [inviteError, setInviteError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [loadingInvites, setLoadingInvites] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [apiKeyName, setApiKeyName] = useState("");
@@ -78,34 +81,59 @@ export function Settings() {
   const isAdmin = user?.role === "Admin";
 
   useEffect(() => {
+    let mounted = true;
+    const failures: string[] = [];
+
+    function loadSetting<T>(name: string, request: Promise<T>, apply: (value: T) => void) {
+      return request
+        .then((value) => {
+          if (mounted) apply(value);
+        })
+        .catch(() => {
+          failures.push(name);
+        });
+    }
+
     setLoadingInvites(true);
-    const adminRequests = isAdmin ? Promise.all([getInvites(), getClientApiKeys()]) : Promise.resolve([[], []] as [InviteToken[], ClientApiKey[]]);
-    Promise.all([adminRequests, getBehaviorSettings(), getBehaviorEvaluation(), getCurrentOrganization(), getDecisionRules(), getPortalUsage(), getInvoices(), getAlertDestinations(), getConsortiumSettings()])
-      .then(([[inviteData, apiKeyData], settingsData, evaluationData, organizationData, rulesData, usageData, invoiceData, destinationData, consortiumData]) => {
-        setInvites(inviteData);
-        setApiKeys(apiKeyData);
-        setBehaviorSettings(settingsData);
-        setEvaluation(evaluationData);
-        setOrganization(organizationData);
-        setRules(rulesData);
-        setUsage(usageData); setInvoices(invoiceData); setDestinations(destinationData); setConsortium(consortiumData);
-      })
-      .catch(() => setMessage("Could not load all platform settings."))
-      .finally(() => setLoadingInvites(false));
+    setLoadError("");
+
+    Promise.all([
+      loadSetting("invitations", isAdmin ? getInvites() : Promise.resolve([]), setInvites),
+      loadSetting("API keys", isAdmin ? getClientApiKeys() : Promise.resolve([]), setApiKeys),
+      loadSetting("behavioral baselines", getBehaviorSettings(), setBehaviorSettings),
+      loadSetting("adaptive learning health", getBehaviorEvaluation(), setEvaluation),
+      loadSetting("organization", getCurrentOrganization(), setOrganization),
+      loadSetting("decision rules", getDecisionRules(), setRules),
+      loadSetting("usage", getPortalUsage(), setUsage),
+      loadSetting("invoices", getInvoices(), setInvoices),
+      loadSetting("alert destinations", getAlertDestinations(), setDestinations),
+      loadSetting("fraud consortium", getConsortiumSettings(), setConsortium)
+    ]).finally(() => {
+      if (!mounted) return;
+      setLoadingInvites(false);
+      if (failures.length > 0) {
+        setLoadError(`Could not load: ${failures.join(", ")}. The other settings remain available.`);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
   }, [isAdmin]);
 
   async function onCreateInvite(event: FormEvent) {
     event.preventDefault();
     setSubmitting(true);
     setMessage("");
+    setInviteError("");
     try {
       const invite = await createInvite(email, role, expiresInHours);
       setCreatedInvite(invite);
       setInvites((current) => [invite, ...current]);
       setEmail("");
       setMessage("Invite generated successfully.");
-    } catch {
-      setMessage("Could not generate invite. Admin access is required.");
+    } catch (error) {
+      setInviteError(getApiErrorMessage(error, "Could not generate invite. Confirm the email and your Admin access."));
     } finally {
       setSubmitting(false);
     }
@@ -113,6 +141,7 @@ export function Settings() {
 
   async function copyInvite(value: string) {
     await navigator.clipboard.writeText(value);
+    setInviteError("");
     setMessage("Invite link copied.");
   }
 
@@ -255,6 +284,7 @@ export function Settings() {
 
   return (
     <div className="page-grid">
+      {loadError && <div className="form-error settings-load-error">{loadError}</div>}
       <section className="insight-panel">
         <div className="section-header">
           <div>
@@ -383,6 +413,7 @@ export function Settings() {
             </form>
 
             {message && <p className="form-success">{message}</p>}
+            {inviteError && <p className="form-error">{inviteError}</p>}
 
             {createdInvite && (
               <div className="invite-result">
@@ -585,4 +616,11 @@ function EvaluationMetric({ label, value }: { label: string; value: string | num
 
 function formatTime(value: string) {
   return value?.replace("T", " ").slice(0, 19) || "N/A";
+}
+
+function getApiErrorMessage(error: unknown, fallback: string) {
+  if (!axios.isAxiosError(error)) return fallback;
+  const detail = error.response?.data?.detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+  return fallback;
 }
