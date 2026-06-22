@@ -1606,7 +1606,6 @@ def list_invites(current_user: AuthUserResponse = Depends(get_current_user)):
         LEFT JOIN app_users u ON u.id = i.created_by
         WHERE i.organization_id = %s
         ORDER BY i.created_at DESC
-        LIMIT 50
     """, (current_user.organization_id or default_organization_id(cursor),))
     rows = cursor.fetchall()
     conn.close()
