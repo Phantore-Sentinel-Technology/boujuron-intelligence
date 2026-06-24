@@ -1,4 +1,4 @@
-# fly.toml app configuration file generated for boujuron-intelligence on 2026-06-24T14:41:08Z
+# fly.toml app configuration file generated for boujuron-intelligence on 2026-06-24T15:34:33Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
@@ -9,7 +9,7 @@ primary_region = 'iad'
 [build]
 
 [http_service]
-  internal_port = 8080
+  internal_port = 8000
   force_https = true
   auto_stop_machines = 'stop'
   auto_start_machines = true
