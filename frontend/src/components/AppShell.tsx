@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Activity, BarChart3, Bell, BriefcaseBusiness, FlaskConical, Gauge, History, LayoutDashboard, LogOut, Moon, Settings, ShieldCheck, Sun, Users, X } from "lucide-react";
+import { Activity, BarChart3, Bell, BriefcaseBusiness, Code2, FlaskConical, Gauge, History, LayoutDashboard, LogOut, Moon, Network, Settings, ShieldCheck, Sun, Users, X } from "lucide-react";
 import type { PropsWithChildren } from "react";
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -14,6 +14,8 @@ const links = [
   { to: "/executive", label: "Executive", icon: BarChart3 },
   { to: "/analytics", label: "Analytics", icon: Activity },
   { to: "/decision-lab", label: "Decision Lab", icon: FlaskConical },
+  { to: "/consortium", label: "Consortium", icon: Network },
+  { to: "/developer-api", label: "API", icon: Code2 },
   { to: "/alerts", label: "Alerts", icon: Bell },
   { to: "/cases", label: "Cases", icon: BriefcaseBusiness },
   { to: "/users", label: "Users", icon: Users },

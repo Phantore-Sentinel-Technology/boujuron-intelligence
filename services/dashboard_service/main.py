@@ -2435,7 +2435,13 @@ async def score_risk(
         "browser_tampering": payload.browser_tampering,
         "sim_swap_detected": payload.sim_swap_detected,
         "password_changed_recently": payload.password_changed_recently,
+        "new_beneficiary_added": payload.new_beneficiary_added,
+        "mule_account_suspected": payload.mule_account_suspected,
         "failed_login_count": payload.failed_login_count,
+        "accounts_from_ip": payload.accounts_from_ip,
+        "accounts_from_device": payload.accounts_from_device,
+        "registration_count": payload.registration_count,
+        "automation_score": payload.automation_score,
     }
 
     cursor.execute("""

@@ -241,7 +241,13 @@ class RiskScoreRequest(BaseModel):
     browser_tampering: bool = False
     sim_swap_detected: bool = False
     password_changed_recently: bool = False
+    new_beneficiary_added: bool = False
+    mule_account_suspected: bool = False
     failed_login_count: int = Field(default=0, ge=0)
+    accounts_from_ip: int = Field(default=0, ge=0)
+    accounts_from_device: int = Field(default=0, ge=0)
+    registration_count: int = Field(default=0, ge=0)
+    automation_score: int = Field(default=0, ge=0, le=100)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     metadata: dict[str, Any] = Field(default_factory=dict)

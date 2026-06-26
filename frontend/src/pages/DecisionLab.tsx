@@ -17,8 +17,8 @@ const scenarios = [
   },
   {
     id: "vpn",
-    name: "VPN Transfer",
-    summary: "Higher-value wallet transfer routed through a VPN.",
+    name: "Suspicious Transfer",
+    summary: "Higher-value wallet transfer routed through a VPN for step-up review.",
     payload: {
       user_id: "customer_102", event_type: "wallet_transfer", amount: 180000,
       device_type: "android", device_id: "android-102", platform: "android",
@@ -33,7 +33,32 @@ const scenarios = [
       user_id: "customer_103", event_type: "wallet_transfer", amount: 750000,
       device_type: "android", device_id: "unknown-android-103", platform: "android",
       operating_system: "Android 14", ip: "45.90.12.10", location: "russia", network: "VPN",
-      password_changed_recently: true, sim_swap_detected: true, failed_login_count: 8, is_rooted: true
+      password_changed_recently: true, sim_swap_detected: true, failed_login_count: 8, is_rooted: true,
+      new_beneficiary_added: true
+    }
+  },
+  {
+    id: "bot",
+    name: "Bot Login Attack",
+    summary: "Credential stuffing from one IP/device across many accounts.",
+    payload: {
+      user_id: "customer_104", event_type: "credential_stuffing", amount: 0,
+      device_type: "headless browser", device_id: "automation-cluster-104", platform: "web",
+      operating_system: "Linux", browser: "Headless Chrome", ip: "203.45.11.90",
+      location: "unknown", network: "PROXY", failed_login_count: 42,
+      accounts_from_ip: 19, accounts_from_device: 8, registration_count: 7, automation_score: 92,
+      browser_tampering: true, device_attestation: "FAILED"
+    }
+  },
+  {
+    id: "agent",
+    name: "Agent Cashout",
+    summary: "High-value POS movement with mule-account indicators.",
+    payload: {
+      user_id: "customer_105", event_type: "agent_cashout", amount: 420000,
+      device_type: "android", device_id: "agent-terminal-105", platform: "android",
+      operating_system: "Android 13", ip: "102.88.18.55", location: "lagos, nigeria",
+      network: "MOBILE", mule_account_suspected: true
     }
   },
   {
@@ -41,8 +66,8 @@ const scenarios = [
     name: "Manipulated Device",
     summary: "Emulator, browser tampering, failed attestation and TOR.",
     payload: {
-      user_id: "customer_104", event_type: "login", amount: 0,
-      device_type: "android emulator", device_id: "emulator-104", platform: "android",
+      user_id: "customer_106", event_type: "login", amount: 0,
+      device_type: "android emulator", device_id: "emulator-106", platform: "android",
       operating_system: "Android 14", browser: "Chrome", ip: "45.90.12.10",
       location: "unknown", network: "TOR", is_emulator: true,
       browser_tampering: true, device_attestation: "FAILED"
@@ -79,7 +104,7 @@ export function DecisionLab() {
         <div>
           <p className="eyebrow">Controlled fraud simulation</p>
           <h2>Boujuron Decision Lab</h2>
-          <p>Run a realistic wallet event through Boujuron and inspect the decision before value leaves the account.</p>
+          <p>Run realistic African wallet, ATO, bot and agent-cashout events through Boujuron before value leaves the account.</p>
         </div>
         <FlaskConical size={28} />
       </section>
@@ -126,6 +151,7 @@ export function DecisionLab() {
             <div><span>Device state</span><strong>{result.device_intelligence?.status || "Not available"}</strong></div>
             <div><span>Account takeover</span><strong>{result.account_takeover?.detected ? "Detected" : "Not detected"}</strong></div>
             <div><span>Matched policies</span><strong>{result.matched_rules.length}</strong></div>
+            <div><span>Why it matters</span><strong>{result.action === "ALLOW" ? "Frictionless customer experience" : result.action === "CHALLENGE" ? "Verify before release" : "Stop loss before payout"}</strong></div>
           </div>
           <div className="decision-evidence">
             {result.signals.map((signal) => (

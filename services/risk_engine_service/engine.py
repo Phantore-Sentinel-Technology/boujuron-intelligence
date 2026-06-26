@@ -41,6 +41,30 @@ def _parse_timestamp(value):
         return None
 
 
+def _metadata(event):
+    data = event.get("metadata")
+    return data if isinstance(data, dict) else {}
+
+
+def _event_value(event, key, default=None):
+    data = _metadata(event)
+    return event.get(key, data.get(key, default))
+
+
+def _event_flag(event, key):
+    value = _event_value(event, key, False)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y"}
+    return bool(value)
+
+
+def _event_int(event, key, default=0):
+    try:
+        return int(_event_value(event, key, default) or 0)
+    except (TypeError, ValueError):
+        return default
+
+
 def _action_for_level(level):
     return {
         "LOW": "ALLOW",
@@ -107,13 +131,13 @@ def analyze_event(event, behavior=None):
     if device in SUSPICIOUS_DEVICES:
         signals.append(_signal("DEVICE", f"Suspicious device: {device}", SUSPICIOUS_DEVICES[device], f"Device type matched {device}"))
 
-    if event.get("is_emulator") and device != "emulator":
+    if _event_flag(event, "is_emulator") and device != "emulator":
         signals.append(_signal("DEVICE", "Emulator detected", 40, "Device telemetry indicates an emulator"))
-    if event.get("is_rooted") and device != "rooted device":
+    if _event_flag(event, "is_rooted") and device != "rooted device":
         signals.append(_signal("DEVICE", "Rooted device detected", 45, "Device integrity checks indicate root access"))
-    if event.get("browser_tampering"):
+    if _event_flag(event, "browser_tampering"):
         signals.append(_signal("DEVICE", "Browser manipulation detected", 35, "Browser fingerprint or runtime integrity changed"))
-    if str(event.get("device_attestation") or "").upper() in {"FAILED", "INVALID", "UNTRUSTED"}:
+    if str(_event_value(event, "device_attestation") or "").upper() in {"FAILED", "INVALID", "UNTRUSTED"}:
         signals.append(_signal("DEVICE", "Device attestation failed", 45, "Client device integrity proof could not be trusted"))
 
     device_status = str(device_intelligence.get("status") or "").upper()
@@ -154,14 +178,44 @@ def analyze_event(event, behavior=None):
     elif event_type == "sim_swap":
         signals.append(_signal("ACCOUNT_TAKEOVER", "SIM swap indicator", 50, "Mobile identity telemetry indicates a recent SIM change"))
 
-    failed_login_count = int(event.get("failed_login_count") or 0)
+    failed_login_count = _event_int(event, "failed_login_count")
     if failed_login_count >= 5 and event_type != "multiple_failed_logins":
         signals.append(_signal("ACCOUNT_TAKEOVER", "Login velocity spike", 30, f"{failed_login_count} recent failed login attempts"))
-    if event.get("password_changed_recently"):
+    if _event_flag(event, "password_changed_recently"):
         signals.append(_signal("ACCOUNT_TAKEOVER", "Recent password change", 20, "Password changed shortly before this event"))
-    if event.get("sim_swap_detected") and event_type != "sim_swap":
+    if _event_flag(event, "sim_swap_detected") and event_type != "sim_swap":
         signals.append(_signal("ACCOUNT_TAKEOVER", "SIM swap indicator", 50, "Mobile identity telemetry indicates a recent SIM change"))
+    if device_intelligence.get("is_new_device") and _event_flag(event, "password_changed_recently"):
+        signals.append(_signal("ACCOUNT_TAKEOVER", "New device after password reset", 35, "A new device appeared shortly after password reset activity"))
+    if device_intelligence.get("is_new_device") and _event_flag(event, "sim_swap_detected"):
+        signals.append(_signal("ACCOUNT_TAKEOVER", "New device after SIM change", 45, "A new device appeared shortly after mobile identity changed"))
+    if _event_flag(event, "new_beneficiary_added"):
+        signals.append(_signal("ACCOUNT_TAKEOVER", "New beneficiary before transfer", 25, "A new beneficiary was added before this value movement"))
     signals.extend(takeover_context.get("signals") or [])
+
+    registration_count = _event_int(event, "registration_count")
+    accounts_from_ip = _event_int(event, "accounts_from_ip")
+    accounts_from_device = _event_int(event, "accounts_from_device")
+    automation_score = _event_int(event, "automation_score")
+    if event_type in {"bot_attack", "credential_stuffing"}:
+        signals.append(_signal("BOT", "Credential stuffing pattern", 50, "Authentication telemetry matches automated credential testing"))
+    if failed_login_count >= 20:
+        signals.append(_signal("BOT", "Repeated failed attempts", 35, f"{failed_login_count} failed attempts indicate automation"))
+    if accounts_from_ip >= 10:
+        signals.append(_signal("BOT", "Many accounts from one IP", 35, f"{accounts_from_ip} accounts share the same network source"))
+    if accounts_from_device >= 5:
+        signals.append(_signal("BOT", "Many accounts from one device", 40, f"{accounts_from_device} accounts share one device fingerprint"))
+    if registration_count >= 5:
+        signals.append(_signal("BOT", "Registration velocity spike", 35, f"{registration_count} registrations originated from the same identity cluster"))
+    if automation_score >= 80:
+        signals.append(_signal("BOT", "Automation-like timing", 30, f"Interaction cadence produced automation score {automation_score}"))
+
+    if event_type in {"airtime_purchase", "data_purchase"} and amount >= 50_000:
+        signals.append(_signal("TRANSACTION", "Airtime/data purchase abuse", 25, "Airtime or data purchase volume is unusually high for wallet activity"))
+    if event_type in {"pos_withdrawal", "agent_cashout"} and amount >= 300_000:
+        signals.append(_signal("TRANSACTION", "POS/agent transaction anomaly", 30, "High-value agent or POS movement requires review"))
+    if _event_flag(event, "mule_account_suspected"):
+        signals.append(_signal("NETWORK", "Mule account movement", 45, "Funds movement pattern resembles mule-account pass-through behavior"))
 
     transaction_velocity = int(behavior.get("transaction_velocity") or 0)
     transaction_limit = int(risk_settings.get("transaction_velocity_limit", 5))
@@ -169,7 +223,7 @@ def analyze_event(event, behavior=None):
     login_limit = int(risk_settings.get("login_velocity_limit", 8))
     velocity_points = int(risk_settings.get("velocity_points", 30))
     velocity_minutes = int(risk_settings.get("velocity_window_minutes", 10))
-    if event_type in {"transaction", "large_transfer", "transfer", "payment"} and transaction_velocity >= transaction_limit:
+    if event_type in {"transaction", "large_transfer", "transfer", "payment", "wallet_transfer", "agent_cashout", "pos_withdrawal"} and transaction_velocity >= transaction_limit:
         signals.append(_signal(
             "VELOCITY",
             "Transaction velocity spike",
