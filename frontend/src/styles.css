@@ -426,8 +426,23 @@ tbody tr:hover {
 }
 
 .reason-cell {
-  max-width: 300px;
+  max-width: 220px;
   color: #cbd5e1;
+}
+
+.drawer-detail-cue {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.1);
+  color: #7dd3fc;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: normal;
 }
 
 .risk-badge {
@@ -2799,6 +2814,12 @@ dd {
   color: #991b1b;
   background: #fee2e2;
   border-color: #f87171;
+}
+
+:root[data-theme="light"] .drawer-detail-cue {
+  color: #075985;
+  background: #e0f2fe;
+  border-color: #7dd3fc;
 }
 
 :root[data-theme="light"] .alert-tags span {

@@ -76,7 +76,9 @@ export function FraudTable({ alerts, loading, onChanged }: FraudTableProps) {
                 <td>{alert.signals_triggered ?? countReasons(alert.reason)}</td>
                 <td className="action-cell">{formatAction(alert.recommended_action)}</td>
                 <td><AlertTags alert={alert} /></td>
-                <td className="reason-cell">{alert.reason}</td>
+                <td className="reason-cell">
+                  <span className="drawer-detail-cue">See investigation drawer detail</span>
+                </td>
                 <td>{formatTime(alert.timestamp)}</td>
                 <td>
                   <ClosureControl alert={alert} onChanged={onChanged} />
