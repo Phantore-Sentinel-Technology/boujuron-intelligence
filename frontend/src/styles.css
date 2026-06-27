@@ -609,15 +609,21 @@ tbody tr:hover {
   display: flex;
   justify-content: flex-end;
   background: rgba(2, 6, 23, 0.62);
+  overflow: hidden;
 }
 
 .alert-drawer {
   width: min(420px, 100%);
-  min-height: 100vh;
+  height: 100vh;
+  max-height: 100vh;
   background: #111827;
   border-left: 1px solid #334155;
   padding: 22px;
   position: relative;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
 }
 
 .icon-button {
@@ -3387,12 +3393,14 @@ dd {
 
   .alert-drawer {
     width: 100%;
-    min-height: min(88vh, 720px);
+    height: min(88vh, 720px);
+    min-height: 0;
     max-height: 88vh;
     border-left: 0;
     border-top: 1px solid #334155;
     overflow-y: auto;
     border-radius: 8px 8px 0 0;
+    padding-bottom: max(22px, env(safe-area-inset-bottom));
   }
 
   .drawer-title {
