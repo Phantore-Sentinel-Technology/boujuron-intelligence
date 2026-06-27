@@ -682,6 +682,50 @@ def materialize_cases_from_alerts(cursor, organization_id: int | None = None):
             VALUES (%s, %s, %s, %s)
         """, (case_id, "CASE_CREATED", "Case opened from fraud alert", "System"))
 
+    auto_close_high_risk_cases(cursor, organization_id)
+
+
+def auto_close_high_risk_cases(cursor, organization_id: int | None = None):
+    cursor.execute("""
+        SELECT id, risk_level, recommended_action, analyst_feedback, decision
+        FROM cases
+        WHERE (%s IS NULL OR organization_id = %s)
+          AND risk_level IN ('HIGH', 'CRITICAL')
+          AND status NOT IN ('RESOLVED', 'ARCHIVED')
+    """, (organization_id, organization_id))
+    rows = cursor.fetchall()
+    for case_id, risk_level, recommended_action, analyst_feedback, decision in rows:
+        auto_decision = "FREEZE" if risk_level == "CRITICAL" else "BLOCK"
+        auto_reason = (
+            "System auto-closed as confirmed high-confidence fraud. "
+            f"{recommended_action or recommended_action_from_risk(risk_level)} was applied immediately; analyst review is not required for this risk tier."
+        )
+        cursor.execute("""
+            UPDATE cases
+            SET status = 'RESOLVED',
+                analyst_feedback = COALESCE(%s, analyst_feedback),
+                decision = COALESCE(%s, decision),
+                resolved_at = COALESCE(resolved_at, CURRENT_TIMESTAMP),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+        """, (analyst_feedback or "TRUE_FRAUD", decision or auto_decision, case_id))
+        cursor.execute("""
+            INSERT INTO case_notes (case_id, author, note)
+            SELECT %s, 'System', %s
+            WHERE NOT EXISTS (
+                SELECT 1 FROM case_notes
+                WHERE case_id = %s AND author = 'System' AND note = %s
+            )
+        """, (case_id, auto_reason, case_id, auto_reason))
+        cursor.execute("""
+            INSERT INTO case_timeline (case_id, event_type, description, actor)
+            SELECT %s, 'AUTO_PND_CLOSURE', %s, 'System'
+            WHERE NOT EXISTS (
+                SELECT 1 FROM case_timeline
+                WHERE case_id = %s AND event_type = 'AUTO_PND_CLOSURE'
+            )
+        """, (case_id, f"{risk_level} risk auto-PND decision completed and case closed", case_id))
+
 
 def timeline(cursor, case_id: int, event_type: str, description: str, actor: str):
     cursor.execute("""
