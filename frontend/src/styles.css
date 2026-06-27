@@ -427,21 +427,27 @@ tbody tr:hover {
 
 .reason-cell {
   max-width: 220px;
+  text-align: center;
   color: #cbd5e1;
 }
 
 .drawer-detail-cue {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: min(172px, 100%);
   max-width: 100%;
-  padding: 7px 10px;
+  min-height: 42px;
+  margin-inline: auto;
+  padding: 8px 12px;
   border: 1px solid rgba(56, 189, 248, 0.28);
-  border-radius: 999px;
+  border-radius: 8px;
   background: rgba(56, 189, 248, 0.1);
   color: #7dd3fc;
   font-size: 12px;
   font-weight: 800;
-  line-height: 1.2;
+  line-height: 1.25;
+  text-align: center;
   white-space: normal;
 }
 
@@ -2820,6 +2826,15 @@ dd {
   color: #075985;
   background: #e0f2fe;
   border-color: #7dd3fc;
+}
+
+:root[data-theme="light"] .alert-drawer .reason-list .eyebrow {
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .alert-drawer .reason-item {
+  color: #0f172a;
+  font-weight: 800;
 }
 
 :root[data-theme="light"] .alert-tags span {
