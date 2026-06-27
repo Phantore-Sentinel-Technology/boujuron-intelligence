@@ -276,6 +276,12 @@ button, a, input, select, textarea {
   gap: 14px;
 }
 
+.ops-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  gap: 14px;
+}
+
 .stat-card, .chart-panel, .table-section, .feed-section, .insight-panel {
   background: #1e293b;
   border: 1px solid #334155;
@@ -778,6 +784,78 @@ dd {
   height: 9px;
   border-radius: 999px;
   background: #38bdf8;
+}
+
+.drawer-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+}
+
+.drawer-section-title {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.drawer-section-title h3 {
+  margin: 2px 0 0;
+  font-size: 18px;
+}
+
+.playbook-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.playbook-step {
+  padding: 10px 12px;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 8px;
+  background: rgba(56, 189, 248, 0.08);
+  color: #dbeafe;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.drawer-timeline {
+  display: grid;
+  gap: 10px;
+}
+
+.drawer-timeline-item {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.drawer-timeline-item > span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.16);
+  color: #7dd3fc;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.drawer-timeline-item strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 14px;
+}
+
+.drawer-timeline-item p {
+  margin: 4px 0 0;
+  color: #cbd5e1;
+  line-height: 1.45;
 }
 
 .auth-page {
@@ -2666,6 +2744,7 @@ dd {
 :root[data-theme="light"] .insight-grid div,
 :root[data-theme="light"] .drawer-summary,
 :root[data-theme="light"] .decision-grid div,
+:root[data-theme="light"] .drawer-panel,
 :root[data-theme="light"] .signal-row,
 :root[data-theme="light"] .profile-facts div,
 :root[data-theme="light"] .timeline-item,
@@ -2837,6 +2916,25 @@ dd {
   font-weight: 800;
 }
 
+:root[data-theme="light"] .playbook-step {
+  color: #075985;
+  background: #e0f2fe;
+  border-color: #7dd3fc;
+}
+
+:root[data-theme="light"] .drawer-timeline-item > span {
+  color: #075985;
+  background: #e0f2fe;
+}
+
+:root[data-theme="light"] .drawer-timeline-item strong {
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .drawer-timeline-item p {
+  color: #334155;
+}
+
 :root[data-theme="light"] .alert-tags span {
   color: #075985;
   background: #e0f2fe;
@@ -3004,6 +3102,10 @@ dd {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .ops-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .profile-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3125,6 +3227,10 @@ dd {
   }
 
   .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ops-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -3254,6 +3360,10 @@ dd {
 
   .main-panel {
     padding: 16px;
+  }
+
+  .ops-grid {
+    grid-template-columns: 1fr;
   }
 
   .topbar,

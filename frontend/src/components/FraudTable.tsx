@@ -21,7 +21,18 @@ export function FraudTable({ alerts, loading, onChanged }: FraudTableProps) {
 
   const filtered = useMemo(() => {
     return alerts.filter((alert) => {
-      const matchesUser = alert.user_id.toLowerCase().includes(query.toLowerCase());
+      const normalizedQuery = query.toLowerCase().trim();
+      const searchable = [
+        alert.user_id,
+        alert.reason,
+        alert.recommended_action || "",
+        alert.case_number || "",
+        alert.case_status || "",
+        alert.analyst_feedback || "",
+        alert.timestamp,
+        alert.risk_level,
+      ].join(" ").toLowerCase();
+      const matchesUser = !normalizedQuery || searchable.includes(normalizedQuery);
       const matchesRisk = risk === "ALL" || alert.risk_level === risk;
       return matchesUser && matchesRisk;
     });
@@ -37,7 +48,7 @@ export function FraudTable({ alerts, loading, onChanged }: FraudTableProps) {
         <div className="table-tools">
           <label className="search-box">
             <Search size={16} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search account" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search user, reason, case, IP, device" />
           </label>
           <div className="segmented">
             {risks.map((item) => (
