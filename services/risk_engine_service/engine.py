@@ -78,8 +78,8 @@ def _recommendation_for_level(level):
     return {
         "LOW": "ALLOW",
         "MEDIUM": "STEP_UP_VERIFICATION",
-        "HIGH": "BLOCK_AND_REVIEW",
-        "CRITICAL": "LOCK_ACCOUNT_AND_ESCALATE",
+        "HIGH": "AUTO_PND_BLOCK_TRANSACTION",
+        "CRITICAL": "AUTO_PND_FREEZE_ACCOUNT_AND_ESCALATE",
     }[level]
 
 
@@ -281,9 +281,13 @@ def analyze_event(event, behavior=None):
         takeover_recommendation = "ALLOW"
     action = _action_for_level(risk_level)
     recommendation = _recommendation_for_level(risk_level)
+    reason_count = len(signals)
+    if risk_level in {"HIGH", "CRITICAL"} or (reason_count >= 3 and score >= 60):
+        action = "LOCK_ACCOUNT" if risk_level == "CRITICAL" else "BLOCK"
+        recommendation = "AUTO_PND_FREEZE_ACCOUNT_AND_ESCALATE" if risk_level == "CRITICAL" else "AUTO_PND_BLOCK_TRANSACTION"
     if takeover_score >= 70:
         action = "LOCK_ACCOUNT"
-        recommendation = "LOCK_ACCOUNT_AND_ESCALATE"
+        recommendation = "AUTO_PND_FREEZE_ACCOUNT_AND_ESCALATE"
     return {
         "risk_score": score,
         "risk_level": risk_level,

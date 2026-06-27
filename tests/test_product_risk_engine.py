@@ -68,7 +68,7 @@ def test_rooted_new_device_and_vpn_is_critical():
     assert result["risk_score"] >= 70
     assert result["risk_level"] == "CRITICAL"
     assert result["action"] == "LOCK_ACCOUNT"
-    assert result["recommendation"] == "LOCK_ACCOUNT_AND_ESCALATE"
+    assert result["recommendation"] == "AUTO_PND_FREEZE_ACCOUNT_AND_ESCALATE"
 
 
 def test_account_takeover_signals_lock_account():
@@ -89,7 +89,7 @@ def test_account_takeover_signals_lock_account():
     assert result["risk_score"] == 100
     assert result["risk_level"] == "CRITICAL"
     assert result["action"] == "LOCK_ACCOUNT"
-    assert result["recommendation"] == "LOCK_ACCOUNT_AND_ESCALATE"
+    assert result["recommendation"] == "AUTO_PND_FREEZE_ACCOUNT_AND_ESCALATE"
 
 
 def test_organization_policy_controls_behavioral_signal_points():

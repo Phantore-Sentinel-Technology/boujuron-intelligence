@@ -613,8 +613,8 @@ def recommended_action_from_risk(risk_level: str | None) -> str:
     return {
         "LOW": "ALLOW",
         "MEDIUM": "STEP_UP_VERIFICATION",
-        "HIGH": "BLOCK_AND_REVIEW",
-        "CRITICAL": "FREEZE_ACCOUNT_AND_ESCALATE",
+        "HIGH": "AUTO_PND_BLOCK_TRANSACTION",
+        "CRITICAL": "AUTO_PND_FREEZE_ACCOUNT_AND_ESCALATE",
     }.get((risk_level or "LOW").upper(), "REVIEW")
 
 
@@ -1851,7 +1851,7 @@ def evaluate_decision_rules(cursor, organization_id: int, event: dict, result: d
     result["recommendation"] = {
         "ALLOW": "ALLOW",
         "CHALLENGE": "STEP_UP_VERIFICATION",
-        "BLOCK": "BLOCK_TRANSACTION",
+        "BLOCK": "AUTO_PND_FREEZE_ACCOUNT_AND_ESCALATE" if result["risk_level"] == "CRITICAL" else "AUTO_PND_BLOCK_TRANSACTION",
     }[final_action]
     result["confidence"] = min(99, max(float(result.get("confidence") or 55), result["risk_score"] + 4))
     return {
@@ -2730,23 +2730,30 @@ def get_fraud(limit: int = Query(50), current_user: AuthUserResponse = Depends(g
     conn, cursor = get_db()
 
     ensure_fraud_alert_columns(cursor)
-    conn.commit()
     organization_id = current_user.organization_id or default_organization_id(cursor)
+    materialize_cases_from_alerts(cursor, organization_id)
+    conn.commit()
 
     cursor.execute("""
         SELECT
-            user_id,
-            reason,
-            timestamp,
-            risk_score,
-            risk_level,
-            recommended_action,
-            confidence,
-            signals_triggered,
-            behavioral_match
-        FROM fraud_alerts
-        WHERE organization_id = %s
-        ORDER BY id DESC LIMIT %s
+            f.id,
+            c.id,
+            c.case_number,
+            c.status,
+            c.analyst_feedback,
+            f.user_id,
+            f.reason,
+            f.timestamp,
+            f.risk_score,
+            f.risk_level,
+            f.recommended_action,
+            f.confidence,
+            f.signals_triggered,
+            f.behavioral_match
+        FROM fraud_alerts f
+        LEFT JOIN cases c ON c.fraud_alert_id = f.id
+        WHERE f.organization_id = %s
+        ORDER BY f.id DESC LIMIT %s
     """, (organization_id, limit))
 
     rows = cursor.fetchall()
@@ -2755,15 +2762,20 @@ def get_fraud(limit: int = Query(50), current_user: AuthUserResponse = Depends(g
 
     return [
         FraudAlertResponse(
-            user_id=r[0],
-            reason=r[1],
-            timestamp=str(r[2]),
-            risk_score=str(r[3]),
-            risk_level=r[4],
-            recommended_action=r[5],
-            confidence=float(r[6]) if r[6] is not None else None,
-            signals_triggered=r[7],
-            behavioral_match=r[8]
+            id=r[0],
+            case_id=r[1],
+            case_number=r[2],
+            case_status=r[3],
+            analyst_feedback=r[4],
+            user_id=r[5],
+            reason=r[6],
+            timestamp=str(r[7]),
+            risk_score=str(r[8]),
+            risk_level=r[9],
+            recommended_action=r[10],
+            confidence=float(r[11]) if r[11] is not None else None,
+            signals_triggered=r[12],
+            behavioral_match=r[13]
         )
         for r in rows
     ]

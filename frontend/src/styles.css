@@ -446,6 +446,76 @@ tbody tr:hover {
 .risk-badge.high { color: #fed7aa; background: rgba(249, 115, 22, 0.16); border: 1px solid rgba(249, 115, 22, 0.35); }
 .risk-badge.critical { color: #fecaca; background: rgba(220, 38, 38, 0.18); border: 1px solid rgba(220, 38, 38, 0.42); }
 
+.alert-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 140px;
+}
+
+.alert-tags span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 23px;
+  padding: 4px 7px;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 999px;
+  background: rgba(14, 165, 233, 0.1);
+  color: #bae6fd;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.dashboard-closure {
+  min-width: 220px;
+  display: grid;
+  gap: 7px;
+  cursor: default;
+}
+
+.closure-selects {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.dashboard-closure select,
+.dashboard-closure input {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid #334155;
+  border-radius: 7px;
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 0 9px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.closure-button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 7px;
+  background: #0ea5e9;
+  color: white;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.closure-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.closure-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #86efac;
+  font-weight: 900;
+}
+
 .feed-list, .rank-list, .user-grid, .threshold-list {
   display: grid;
   gap: 10px;
@@ -2656,6 +2726,43 @@ dd {
   color: #64748b;
 }
 
+:root[data-theme="light"] .risk-badge.low {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+:root[data-theme="light"] .risk-badge.medium {
+  color: #92400e;
+  background: #fef3c7;
+  border-color: #f59e0b;
+}
+
+:root[data-theme="light"] .risk-badge.high {
+  color: #9a3412;
+  background: #ffedd5;
+  border-color: #fb923c;
+}
+
+:root[data-theme="light"] .risk-badge.critical {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: #f87171;
+}
+
+:root[data-theme="light"] .alert-tags span {
+  color: #075985;
+  background: #e0f2fe;
+  border-color: #7dd3fc;
+}
+
+:root[data-theme="light"] .dashboard-closure select,
+:root[data-theme="light"] .dashboard-closure input {
+  color: #0f172a;
+  background: #ffffff;
+  border-color: #cbd5e1;
+}
+
 :root[data-theme="light"] .case-detail-hero span,
 :root[data-theme="light"] .case-hero-risk span,
 :root[data-theme="light"] .filter-select span,
@@ -3247,8 +3354,10 @@ dd {
   .fraud-table-section td:nth-child(4)::before { content: "Confidence"; }
   .fraud-table-section td:nth-child(5)::before { content: "Signals"; }
   .fraud-table-section td:nth-child(6)::before { content: "Action"; }
-  .fraud-table-section td:nth-child(7)::before { content: "Reason"; }
-  .fraud-table-section td:nth-child(8)::before { content: "Time"; }
+  .fraud-table-section td:nth-child(7)::before { content: "Tags"; }
+  .fraud-table-section td:nth-child(8)::before { content: "Reason"; }
+  .fraud-table-section td:nth-child(9)::before { content: "Time"; }
+  .fraud-table-section td:nth-child(10)::before { content: "Closure"; }
 
   .case-table-section td:nth-child(1)::before { content: "Case"; }
   .case-table-section td:nth-child(2)::before { content: "User"; }

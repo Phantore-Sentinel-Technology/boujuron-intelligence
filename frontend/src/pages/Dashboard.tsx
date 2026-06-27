@@ -10,9 +10,10 @@ interface DashboardProps {
   topAlerts: FraudAlert[];
   stats: AlertStats;
   loading: boolean;
+  reloadAlerts: () => Promise<void>;
 }
 
-export function Dashboard({ alerts, topAlerts, stats, loading }: DashboardProps) {
+export function Dashboard({ alerts, topAlerts, stats, loading, reloadAlerts }: DashboardProps) {
   return (
     <div className="page-grid">
       <section className="stats-grid">
@@ -29,7 +30,7 @@ export function Dashboard({ alerts, topAlerts, stats, loading }: DashboardProps)
       </div>
 
       <div className="content-grid">
-        <FraudTable alerts={topAlerts} loading={loading} />
+        <FraudTable alerts={topAlerts} loading={loading} onChanged={reloadAlerts} />
         <LiveActivityFeed alerts={alerts} />
       </div>
     </div>

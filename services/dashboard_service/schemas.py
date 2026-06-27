@@ -369,6 +369,11 @@ class EventResponse(BaseModel):
 
 
 class FraudAlertResponse(BaseModel):
+    id: int | None = None
+    case_id: int | None = None
+    case_number: str | None = None
+    case_status: str | None = None
+    analyst_feedback: str | None = None
     user_id: str
     reason: str
     timestamp: str

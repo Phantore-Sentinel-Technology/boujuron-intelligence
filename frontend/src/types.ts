@@ -1,6 +1,11 @@
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
 export interface FraudAlert {
+  id?: number | null;
+  case_id?: number | null;
+  case_number?: string | null;
+  case_status?: CaseStatus | null;
+  analyst_feedback?: AnalystFeedback | null;
   user_id: string;
   reason: string;
   timestamp: string;
@@ -180,7 +185,7 @@ export interface RiskDecision {
   user_id: string;
   risk_score: number;
   risk_level: RiskLevel;
-  action: "ALLOW" | "CHALLENGE" | "BLOCK";
+  action: "ALLOW" | "CHALLENGE" | "BLOCK" | "LOCK_ACCOUNT";
   recommendation: string;
   confidence: number;
   reasons: string[];

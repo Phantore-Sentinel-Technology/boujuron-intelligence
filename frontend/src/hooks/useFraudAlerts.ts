@@ -14,15 +14,19 @@ export function useFraudAlerts() {
   const [loading, setLoading] = useState(true);
   const [connection, setConnection] = useState<"live" | "polling" | "offline">("polling");
 
-  useEffect(() => {
-    let mounted = true;
-
-    getFraudAlerts()
+  function reloadAlerts() {
+    setLoading(true);
+    return getFraudAlerts()
       .then((data) => {
-        if (mounted) setAlerts(data);
+        setAlerts(data);
+        setConnection((current) => (current === "live" ? current : "polling"));
       })
       .catch(() => setConnection("offline"))
-      .finally(() => mounted && setLoading(false));
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    reloadAlerts().catch(() => undefined);
 
     const timer = window.setInterval(() => {
       getFraudAlerts()
@@ -34,7 +38,6 @@ export function useFraudAlerts() {
     }, 5000);
 
     return () => {
-      mounted = false;
       window.clearInterval(timer);
     };
   }, []);
@@ -77,5 +80,5 @@ export function useFraudAlerts() {
     [alerts]
   );
 
-  return { alerts, topAlerts, stats, loading, connection };
+  return { alerts, topAlerts, stats, loading, connection, reloadAlerts };
 }
