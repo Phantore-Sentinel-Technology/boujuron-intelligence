@@ -374,6 +374,7 @@ class FraudAlertResponse(BaseModel):
     case_number: str | None = None
     case_status: str | None = None
     analyst_feedback: str | None = None
+    closure_note: str | None = None
     user_id: str
     reason: str
     timestamp: str

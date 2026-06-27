@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { ShieldAlert, X } from "lucide-react";
+import { CheckCircle2, ShieldAlert, X } from "lucide-react";
 import type { FraudAlert } from "../types";
 import { RiskBadge } from "./RiskBadge";
 import { ScoreBreakdown } from "./ScoreBreakdown";
@@ -12,6 +12,8 @@ interface AlertDrawerProps {
 
 export function AlertDrawer({ alert, onClose }: AlertDrawerProps) {
   const reasons = alert.reason.split(",").map((reason) => reason.trim()).filter(Boolean);
+  const closed = alert.case_status === "RESOLVED" || alert.case_status === "ARCHIVED";
+  const closureNote = alert.closure_note || defaultClosureNote(alert);
 
   return (
     <motion.aside
@@ -28,7 +30,15 @@ export function AlertDrawer({ alert, onClose }: AlertDrawerProps) {
         <ShieldAlert size={22} />
         <div>
           <p className="eyebrow">Investigation detail</p>
-          <h2>{alert.user_id}</h2>
+          <div className="drawer-heading-row">
+            <h2>{alert.user_id}</h2>
+            {closed && (
+              <span className="drawer-status-pill">
+                <CheckCircle2 size={15} />
+                Closed
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -38,6 +48,20 @@ export function AlertDrawer({ alert, onClose }: AlertDrawerProps) {
         <span>risk score</span>
       </div>
 
+      {closed && (
+        <section className="closure-summary-card">
+          <div>
+            <p className="eyebrow">Closure status</p>
+            <strong>{formatCaseStatus(alert.case_status)}</strong>
+          </div>
+          <div>
+            <p className="eyebrow">Analyst feedback</p>
+            <strong>{formatLabel(alert.analyst_feedback || "TRUE_FRAUD")}</strong>
+          </div>
+          <p>{closureNote}</p>
+        </section>
+      )}
+
       <dl className="decision-grid">
         <div>
           <dt>Recommended action</dt>
@@ -45,7 +69,7 @@ export function AlertDrawer({ alert, onClose }: AlertDrawerProps) {
         </div>
         <div>
           <dt>Confidence</dt>
-          <dd>{alert.confidence ? `${Math.round(alert.confidence * 100)}%` : "N/A"}</dd>
+          <dd>{formatConfidence(alert.confidence)}</dd>
         </div>
         <div>
           <dt>Behavioral match</dt>
@@ -70,4 +94,28 @@ export function AlertDrawer({ alert, onClose }: AlertDrawerProps) {
       <ScoreBreakdown items={explainAlert(alert)} total={Number(alert.risk_score || 0)} />
     </motion.aside>
   );
+}
+
+function formatConfidence(confidence?: number | null) {
+  if (confidence === null || confidence === undefined) return "N/A";
+  const normalized = confidence > 1 ? confidence : confidence * 100;
+  return `${Math.round(normalized)}%`;
+}
+
+function formatCaseStatus(status?: string | null) {
+  return formatLabel(status || "RESOLVED");
+}
+
+function formatLabel(value: string) {
+  return value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function defaultClosureNote(alert: FraudAlert) {
+  if (alert.risk_level === "CRITICAL") {
+    return "System auto-closed this case after applying immediate freeze/PND controls for a critical, high-confidence fraud pattern.";
+  }
+  if (alert.risk_level === "HIGH") {
+    return "System auto-closed this case after applying immediate PND/block controls for a high-risk fraud pattern.";
+  }
+  return "Case has been closed with the recorded investigation outcome.";
 }

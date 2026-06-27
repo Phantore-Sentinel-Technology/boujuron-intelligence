@@ -6,6 +6,7 @@ export interface FraudAlert {
   case_number?: string | null;
   case_status?: CaseStatus | null;
   analyst_feedback?: AnalystFeedback | null;
+  closure_note?: string | null;
   user_id: string;
   reason: string;
   timestamp: string;

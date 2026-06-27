@@ -2785,6 +2785,7 @@ def get_fraud(limit: int = Query(50), current_user: AuthUserResponse = Depends(g
             c.case_number,
             c.status,
             c.analyst_feedback,
+            latest_note.note,
             f.user_id,
             f.reason,
             f.timestamp,
@@ -2796,6 +2797,13 @@ def get_fraud(limit: int = Query(50), current_user: AuthUserResponse = Depends(g
             f.behavioral_match
         FROM fraud_alerts f
         LEFT JOIN cases c ON c.fraud_alert_id = f.id
+        LEFT JOIN LATERAL (
+            SELECT note
+            FROM case_notes
+            WHERE case_id = c.id
+            ORDER BY id DESC
+            LIMIT 1
+        ) latest_note ON TRUE
         WHERE f.organization_id = %s
         ORDER BY f.id DESC LIMIT %s
     """, (organization_id, limit))
@@ -2811,15 +2819,16 @@ def get_fraud(limit: int = Query(50), current_user: AuthUserResponse = Depends(g
             case_number=r[2],
             case_status=r[3],
             analyst_feedback=r[4],
-            user_id=r[5],
-            reason=r[6],
-            timestamp=str(r[7]),
-            risk_score=str(r[8]),
-            risk_level=r[9],
-            recommended_action=r[10],
-            confidence=float(r[11]) if r[11] is not None else None,
-            signals_triggered=r[12],
-            behavioral_match=r[13]
+            closure_note=r[5],
+            user_id=r[6],
+            reason=r[7],
+            timestamp=str(r[8]),
+            risk_score=str(r[9]),
+            risk_level=r[10],
+            recommended_action=r[11],
+            confidence=float(r[12]) if r[12] is not None else None,
+            signals_triggered=r[13],
+            behavioral_match=r[14]
         )
         for r in rows
     ]
