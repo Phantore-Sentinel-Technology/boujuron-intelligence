@@ -2384,6 +2384,14 @@ def health():
     return {"status": "ok", "service": "boujuron-dashboard-api"}
 
 
+@app.get("/favicon.svg")
+def serve_favicon():
+    favicon_path = FRONTEND_DIST / "favicon.svg"
+    if favicon_path.exists():
+        return FileResponse(favicon_path, media_type="image/svg+xml")
+    return Response(status_code=404)
+
+
 def risk_response_from_row(row) -> RiskScoreResponse:
     return RiskScoreResponse(
         decision_id=row[0],
