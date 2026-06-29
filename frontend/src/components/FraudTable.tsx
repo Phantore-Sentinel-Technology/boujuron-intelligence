@@ -62,6 +62,21 @@ export function FraudTable({ alerts, loading, onChanged }: FraudTableProps) {
 
       <div className="table-wrap">
         <table>
+          <colgroup>
+            <col className="col-user" />
+            <col className="col-transaction" />
+            <col className="col-direction" />
+            <col className="col-reason" />
+            <col className="col-score" />
+            <col className="col-confidence" />
+            <col className="col-risk" />
+            <col className="col-recommendation" />
+            <col className="col-tags" />
+            <col className="col-time" />
+            <col className="col-status" />
+            <col className="col-actions" />
+            <col className="col-open" />
+          </colgroup>
           <thead>
             <tr>
               <th>User</th>
@@ -86,14 +101,14 @@ export function FraudTable({ alerts, loading, onChanged }: FraudTableProps) {
                 <td className="mono-cell">{alert.transaction_id || "N/A"}</td>
                 <td><span className="direction-pill">{alert.transaction_direction || "DEBIT"}</span></td>
                 <td className="reason-cell">
-                  <span className="drawer-detail-cue">See investigation drawer detail</span>
+                  <span className="drawer-detail-cue">Investigation details</span>
                 </td>
-                <td>{alert.risk_score}</td>
-                <td>{formatConfidence(alert.confidence)}</td>
+                <td className="number-cell">{alert.risk_score}</td>
+                <td className="number-cell">{formatConfidence(alert.confidence)}</td>
                 <td><RiskBadge level={alert.risk_level} /></td>
                 <td className="action-cell">{formatAction(alert.recommended_action)}</td>
                 <td><AlertTags alert={alert} /></td>
-                <td>{formatTime(alert.timestamp)}</td>
+                <td className="time-cell">{formatTime(alert.timestamp)}</td>
                 <td>
                   <CaseStatusBadge alert={alert} />
                 </td>
@@ -126,16 +141,26 @@ function AnalystActions({ alert, onChanged }: { alert: FraudAlert; onChanged?: (
   const closed = isClosed(alert.case_status);
   const reversible = canReverse(alert);
 
+  if (!alert.case_id) {
+    return (
+      <div className="dashboard-closure monitoring-action" onClick={(event) => event.stopPropagation()}>
+        <span>Monitoring only</span>
+        <small>{monitoringCopy(alert)}</small>
+      </div>
+    );
+  }
+
+  const caseId = alert.case_id;
+
   async function runAction(action: "review" | "confirm" | "false-positive" | "reverse" | "close") {
-    if (!alert.case_id) return;
     setSaving(true);
     try {
       const note = comment.trim() || undefined;
-      if (action === "review") await reviewCase(alert.case_id, note);
-      if (action === "confirm") await confirmFraudCase(alert.case_id, note);
-      if (action === "false-positive") await markFalsePositiveCase(alert.case_id, note);
-      if (action === "reverse") await reverseCaseRestriction(alert.case_id, note);
-      if (action === "close") await closeCaseWorkflow(alert.case_id, note);
+      if (action === "review") await reviewCase(caseId, note);
+      if (action === "confirm") await confirmFraudCase(caseId, note);
+      if (action === "false-positive") await markFalsePositiveCase(caseId, note);
+      if (action === "reverse") await reverseCaseRestriction(caseId, note);
+      if (action === "close") await closeCaseWorkflow(caseId, note);
       setComment("");
       await onChanged?.();
     } finally {
@@ -186,7 +211,7 @@ function AnalystActions({ alert, onChanged }: { alert: FraudAlert; onChanged?: (
 }
 
 function CaseStatusBadge({ alert }: { alert: FraudAlert }) {
-  if (!alert.case_id) return <span className="muted-text">No case</span>;
+  if (!alert.case_id) return <span className="muted-text">No case needed</span>;
   return <span className={isClosed(alert.case_status) ? "closure-done" : "case-open"}>{alert.case_status || "OPEN"}</span>;
 }
 
@@ -221,6 +246,12 @@ function canReverse(alert: FraudAlert) {
   const status = alert.case_status || "";
   const wasRestricted = action.includes("HOLD") || action.includes("PND") || action.includes("BLOCK") || alert.risk_level === "HIGH" || alert.risk_level === "CRITICAL";
   return Boolean(alert.case_id) && status !== "REVERSED" && wasRestricted;
+}
+
+function monitoringCopy(alert: FraudAlert) {
+  if (alert.risk_level === "LOW") return "Allowed decision. No analyst closure required.";
+  if (alert.risk_level === "MEDIUM") return "Step-up verification tracked without opening a case.";
+  return "No case record exists for this decision.";
 }
 
 function formatTime(timestamp: string) {
