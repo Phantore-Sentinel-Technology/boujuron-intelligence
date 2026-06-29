@@ -170,6 +170,7 @@ function decisionSentence(item: AuditLog) {
   if (item.action_taken === "MARKED_FALSE_POSITIVE") return "An analyst marked this case as a false positive.";
   if (item.action_taken === "TRANSACTION_BLOCKED") return "Boujuron applied a block or PND decision.";
   if (item.action_taken === "TRANSACTION_HELD") return "Boujuron held this transaction for review.";
+  if (item.action_taken === "RISK_DECISION_RECORDED") return "Boujuron scored and recorded this banking transaction decision.";
   if (item.action_taken === "CLOSED") return "An analyst closed this case.";
   if (item.action_taken === "CASE_REVIEWED") return "An analyst moved this case into review.";
   return "Boujuron recorded a platform decision.";

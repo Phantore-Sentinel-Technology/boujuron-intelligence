@@ -2656,47 +2656,56 @@ async def score_risk(
     )
     decision_row = (*decision_row[:14], action_decision_id, decision_row[15], decision_row[16])
 
-    alert = None
-    if result["risk_score"] >= 40 or result["action"] != "ALLOW":
-        cursor.execute("""
-            INSERT INTO fraud_alerts (
-                organization_id, risk_decision_id, transaction_id, transaction_direction, user_id, reason, risk_score, risk_level, timestamp,
-                recommended_action, confidence, signals_triggered, behavioral_match
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-        """, (
-            organization_id,
-            decision_row[0],
-            transaction_id,
-            payload.transaction_direction,
-            payload.user_id,
-            result["reason"],
-            result["risk_score"],
-            result["risk_level"],
-            event["timestamp"],
-            result["recommendation"],
-            result["confidence"],
-            len(result["signals"]),
-            result["behavioral_match"],
-        ))
-        alert_id = cursor.fetchone()[0]
-        materialize_cases_from_alerts(cursor, organization_id)
-        alert = {
-            "id": alert_id,
-            "transaction_id": transaction_id,
-            "transaction_direction": payload.transaction_direction,
-            "user_id": payload.user_id,
-            "reason": result["reason"],
-            "risk_score": str(result["risk_score"]),
-            "risk_level": result["risk_level"],
-            "timestamp": event["timestamp"],
-            "recommended_action": result["recommendation"],
-            "confidence": float(result["confidence"]),
-            "signals_triggered": len(result["signals"]),
-            "behavioral_match": result["behavioral_match"],
-        }
-        deliver_alerts(cursor, organization_id, alert)
+    audit_log(
+        cursor,
+        organization_id,
+        None,
+        transaction_id,
+        payload.user_id,
+        "RISK_DECISION_RECORDED",
+        None,
+        result["risk_level"],
+        f"{result['recommendation']} decision recorded with score {result['risk_score']} and confidence {result['confidence']}%",
+    )
+    cursor.execute("""
+        INSERT INTO fraud_alerts (
+            organization_id, risk_decision_id, transaction_id, transaction_direction, user_id, reason, risk_score, risk_level, timestamp,
+            recommended_action, confidence, signals_triggered, behavioral_match
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+    """, (
+        organization_id,
+        decision_row[0],
+        transaction_id,
+        payload.transaction_direction,
+        payload.user_id,
+        result["reason"],
+        result["risk_score"],
+        result["risk_level"],
+        event["timestamp"],
+        result["recommendation"],
+        result["confidence"],
+        len(result["signals"]),
+        result["behavioral_match"],
+    ))
+    alert_id = cursor.fetchone()[0]
+    materialize_cases_from_alerts(cursor, organization_id)
+    alert = {
+        "id": alert_id,
+        "transaction_id": transaction_id,
+        "transaction_direction": payload.transaction_direction,
+        "user_id": payload.user_id,
+        "reason": result["reason"],
+        "risk_score": str(result["risk_score"]),
+        "risk_level": result["risk_level"],
+        "timestamp": event["timestamp"],
+        "recommended_action": result["recommendation"],
+        "confidence": float(result["confidence"]),
+        "signals_triggered": len(result["signals"]),
+        "behavioral_match": result["behavioral_match"],
+    }
+    deliver_alerts(cursor, organization_id, alert)
 
     update_behavior_profile(
         cursor,
