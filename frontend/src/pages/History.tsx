@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Clock3, Filter, History as HistoryIcon, KeyRound, Search } from "lucide-react";
-import type { IntelligenceActivity, InvestigationFeedItem, InviteToken } from "../types";
-import { getIntelligenceActivity, getInvites } from "../services/api";
+import type { AuditLog, IntelligenceActivity, InvestigationFeedItem, InviteToken } from "../types";
+import { getAuditLogs, getIntelligenceActivity, getInvites } from "../services/api";
 import { RiskBadge } from "../components/RiskBadge";
 import { useAuth } from "../context/AuthContext";
 
@@ -10,6 +10,7 @@ export function History() {
   const { user } = useAuth();
   const [activity, setActivity] = useState<IntelligenceActivity>({ notifications: [], feed: [] });
   const [invites, setInvites] = useState<InviteToken[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [query, setQuery] = useState("");
   const [eventType, setEventType] = useState("ALL");
   const [loading, setLoading] = useState(true);
@@ -20,11 +21,13 @@ export function History() {
     const load = () => {
       Promise.allSettled([
         getIntelligenceActivity(200),
+        getAuditLogs(200),
         isAdmin ? getInvites() : Promise.resolve([] as InviteToken[])
       ])
-        .then(([activityResult, inviteResult]) => {
+        .then(([activityResult, auditResult, inviteResult]) => {
           if (!mounted) return;
           if (activityResult.status === "fulfilled") setActivity(activityResult.value);
+          if (auditResult.status === "fulfilled") setAuditLogs(auditResult.value);
           if (inviteResult.status === "fulfilled") setInvites(inviteResult.value);
         })
         .finally(() => mounted && setLoading(false));
@@ -38,9 +41,12 @@ export function History() {
   }, [isAdmin]);
 
   const eventTypes = useMemo(() => {
-    const values = activity.feed.map((item) => item.event_type).filter(Boolean);
+    const values = [
+      ...activity.feed.map((item) => item.event_type).filter(Boolean),
+      ...auditLogs.map((item) => item.action_taken).filter(Boolean),
+    ];
     return ["ALL", ...Array.from(new Set(values))];
-  }, [activity.feed]);
+  }, [activity.feed, auditLogs]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -59,6 +65,17 @@ export function History() {
     });
   }, [invites, query]);
 
+  const filteredAuditLogs = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return auditLogs.filter((item) => {
+      const matchesType = eventType === "ALL" || item.action_taken === eventType;
+      const content = `${item.action_taken} ${item.user_id || ""} ${item.transaction_id || ""} ${item.case_id || ""} ${item.previous_status || ""} ${item.new_status || ""} ${item.analyst_note || ""}`.toLowerCase();
+      return matchesType && (!needle || content.includes(needle));
+    });
+  }, [auditLogs, eventType, query]);
+
+  const totalRecords = filtered.length + filteredInvites.length + filteredAuditLogs.length;
+
   return (
     <div className="page-grid">
       <section className="case-command history-command">
@@ -68,7 +85,7 @@ export function History() {
         </div>
         <div className="live-indicator history-count">
           <Clock3 size={18} />
-          {filtered.length + filteredInvites.length} records
+          {totalRecords} records
         </div>
       </section>
 
@@ -110,13 +127,52 @@ export function History() {
         </div>
 
         <div className="history-list">
+          {filteredAuditLogs.map((item) => <AuditHistoryItem key={`audit-${item.id}`} item={item} />)}
           {filtered.map((item) => <HistoryItem key={item.id} item={item} />)}
           {loading && <div className="empty-state slim">Loading platform history...</div>}
-          {!loading && filtered.length === 0 && <div className="empty-state slim">No matching history records yet.</div>}
+          {!loading && filtered.length === 0 && filteredAuditLogs.length === 0 && <div className="empty-state slim">No matching history records yet.</div>}
         </div>
       </section>
     </div>
   );
+}
+
+function AuditHistoryItem({ item }: { item: AuditLog }) {
+  return (
+    <article className="history-item audit-history-item">
+      <div className="history-icon">
+        <HistoryIcon size={17} />
+      </div>
+      <div>
+        <div className="history-title">
+          <strong>{formatLabel(item.action_taken)}</strong>
+          {item.new_status && <span className="audit-status">{formatLabel(item.new_status)}</span>}
+        </div>
+        <p>
+          {decisionSentence(item)}
+          {item.analyst_note ? ` Note: ${item.analyst_note}` : ""}
+        </p>
+        <span>
+          {item.transaction_id ? `Transaction ${item.transaction_id}` : "No transaction ID"}
+          {item.case_id ? ` / Case #${item.case_id}` : ""}
+          {item.user_id ? ` / ${item.user_id}` : ""}
+          {item.previous_status && item.new_status ? ` / ${formatLabel(item.previous_status)} to ${formatLabel(item.new_status)}` : ""}
+        </span>
+      </div>
+      <time>{formatTime(item.created_at)}</time>
+    </article>
+  );
+}
+
+function decisionSentence(item: AuditLog) {
+  if (item.action_taken === "REVERSED") return "An analyst reversed the transaction restriction.";
+  if (item.action_taken === "CONFIRMED_FRAUD") return "An analyst confirmed this case as fraud.";
+  if (item.action_taken === "MARKED_FALSE_POSITIVE") return "An analyst marked this case as a false positive.";
+  if (item.action_taken === "TRANSACTION_BLOCKED") return "Boujuron applied a block or PND decision.";
+  if (item.action_taken === "TRANSACTION_HELD") return "Boujuron held this transaction for review.";
+  if (item.action_taken === "CLOSED") return "An analyst closed this case.";
+  if (item.action_taken === "CASE_REVIEWED") return "An analyst moved this case into review.";
+  return "Boujuron recorded a platform decision.";
 }
 
 function InviteHistoryItem({ invite }: { invite: InviteToken }) {

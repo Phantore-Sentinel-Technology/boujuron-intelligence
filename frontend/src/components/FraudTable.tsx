@@ -146,7 +146,23 @@ function AnalystActions({ alert, onChanged }: { alert: FraudAlert; onChanged?: (
   return (
     <div className="dashboard-closure" onClick={(event) => event.stopPropagation()}>
       {closed ? (
-        <span className="closure-done"><CheckCircle2 size={14} /> Closed</span>
+        <div className="closed-action-panel">
+          <span className="closure-done"><CheckCircle2 size={14} /> Closed</span>
+          {reversible && (
+            <>
+              <input
+                value={comment}
+                onChange={(event) => setComment(event.target.value)}
+                placeholder="Reason for reversal"
+              />
+              <div className="case-action-buttons">
+                <button disabled={!alert.case_id || saving} onClick={() => runAction("reverse")}>
+                  {saving ? "Reversing..." : "Reverse Restriction"}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       ) : (
         <>
           <input
@@ -202,7 +218,9 @@ function isClosed(status?: string | null) {
 
 function canReverse(alert: FraudAlert) {
   const action = (alert.recommended_action || "").toUpperCase();
-  return Boolean(alert.case_id) && !isClosed(alert.case_status) && (action.includes("HOLD") || action.includes("PND") || action.includes("BLOCK"));
+  const status = alert.case_status || "";
+  const wasRestricted = action.includes("HOLD") || action.includes("PND") || action.includes("BLOCK") || alert.risk_level === "HIGH" || alert.risk_level === "CRITICAL";
+  return Boolean(alert.case_id) && status !== "REVERSED" && wasRestricted;
 }
 
 function formatTime(timestamp: string) {

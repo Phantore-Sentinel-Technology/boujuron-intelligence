@@ -538,6 +538,11 @@ tbody tr:hover {
   cursor: default;
 }
 
+.closed-action-panel {
+  display: grid;
+  gap: 8px;
+}
+
 .case-action-buttons {
   display: flex;
   flex-wrap: wrap;
@@ -1574,6 +1579,18 @@ dd {
   color: #38bdf8;
   font-weight: 800;
   text-decoration: none;
+}
+
+.audit-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 999px;
+  background: rgba(14, 165, 233, 0.1);
+  color: #bae6fd;
+  font-weight: 900;
 }
 
 .executive-hero {
