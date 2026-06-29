@@ -38,6 +38,9 @@ from services.dashboard_service.schemas import (
     AccountSecurityResponse,
     AnalystPerformanceResponse,
     AnalyticsOverviewResponse,
+    AuditLogResponse,
+    CaseActionRequest,
+    CaseActionResponse,
     CaseDetailResponse,
     CaseNoteRequest,
     CaseNoteResponse,
@@ -88,10 +91,13 @@ AUTH_SECRET = settings.JWT_SECRET
 TOKEN_TTL_SECONDS = 60 * 60 * 12
 PASSWORD_RESET_TTL_MINUTES = 60
 ALLOWED_ROLES = {"Admin", "Fraud Analyst", "Investigator", "Read-Only Auditor"}
-CASE_STATUSES = {"NEW", "ASSIGNED", "INVESTIGATING", "ESCALATED", "RESOLVED", "ARCHIVED"}
+CASE_STATUSES = {
+    "NEW", "ASSIGNED", "INVESTIGATING", "ESCALATED", "RESOLVED", "ARCHIVED",
+    "OPEN", "UNDER_REVIEW", "CONFIRMED_FRAUD", "FALSE_POSITIVE", "REVERSED", "CLOSED",
+}
 CASE_PRIORITIES = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
 ANALYST_FEEDBACK = {"TRUE_FRAUD", "FALSE_POSITIVE", "NEEDS_REVIEW"}
-CASE_DECISIONS = {"ALLOW", "VERIFY", "BLOCK", "FREEZE", "ESCALATE"}
+CASE_DECISIONS = {"ALLOW", "VERIFY", "BLOCK", "FREEZE", "ESCALATE", "STEP_UP_VERIFY", "HOLD_FOR_REVIEW", "PND_OR_BLOCK"}
 
 
 def get_cors_origins():
@@ -322,6 +328,7 @@ def ensure_event_table(cursor):
     for column_name, column_type in (
         ("organization_id", "INTEGER"),
         ("transaction_id", "TEXT"),
+        ("transaction_direction", "TEXT DEFAULT 'DEBIT'"),
         ("amount", "NUMERIC"),
         ("location", "TEXT"),
         ("network", "TEXT"),
@@ -362,6 +369,7 @@ def ensure_risk_decision_table(cursor):
     """)
     for column_name, column_type in (
         ("organization_id", "INTEGER"),
+        ("transaction_direction", "TEXT DEFAULT 'DEBIT'"),
         ("recommendation", "TEXT"),
         ("analyst_feedback", "TEXT"),
         ("feedback_at", "TIMESTAMP"),
@@ -422,6 +430,17 @@ def ensure_case_tables(cursor):
         )
     """)
     cursor.execute("ALTER TABLE cases ADD COLUMN IF NOT EXISTS organization_id INTEGER")
+    for column_name, column_type in (
+        ("transaction_id", "TEXT"),
+        ("transaction_direction", "TEXT DEFAULT 'DEBIT'"),
+        ("confidence", "NUMERIC"),
+        ("analyst_note", "TEXT"),
+        ("reversed_at", "TIMESTAMP"),
+    ):
+        cursor.execute(f"""
+            ALTER TABLE cases
+            ADD COLUMN IF NOT EXISTS {column_name} {column_type}
+        """)
     cursor.execute("""
         UPDATE cases
         SET organization_id = (SELECT id FROM organizations WHERE slug = 'boujuron')
@@ -443,6 +462,20 @@ def ensure_case_tables(cursor):
             event_type TEXT NOT NULL,
             description TEXT NOT NULL,
             actor TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fraud_audit_logs (
+            id SERIAL PRIMARY KEY,
+            organization_id INTEGER,
+            case_id INTEGER,
+            transaction_id TEXT,
+            user_id TEXT,
+            action_taken TEXT NOT NULL,
+            previous_status TEXT,
+            new_status TEXT,
+            analyst_note TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -533,6 +566,8 @@ def ensure_fraud_alert_columns(cursor):
     for column_name, column_type in (
         ("organization_id", "INTEGER"),
         ("risk_decision_id", "INTEGER"),
+        ("transaction_id", "TEXT"),
+        ("transaction_direction", "TEXT DEFAULT 'DEBIT'"),
         ("recommended_action", "TEXT"),
         ("confidence", "NUMERIC"),
         ("signals_triggered", "INTEGER"),
@@ -612,10 +647,45 @@ def priority_from_risk(risk_level: str | None) -> str:
 def recommended_action_from_risk(risk_level: str | None) -> str:
     return {
         "LOW": "ALLOW",
-        "MEDIUM": "STEP_UP_VERIFICATION",
-        "HIGH": "AUTO_PND_BLOCK_TRANSACTION",
-        "CRITICAL": "AUTO_PND_FREEZE_ACCOUNT_AND_ESCALATE",
+        "MEDIUM": "STEP_UP_VERIFY",
+        "HIGH": "HOLD_FOR_REVIEW",
+        "CRITICAL": "PND_OR_BLOCK",
     }.get((risk_level or "LOW").upper(), "REVIEW")
+
+
+def should_create_case(risk_level: str | None, action: str | None) -> bool:
+    normalized_level = (risk_level or "LOW").upper()
+    normalized_action = (action or "").upper()
+    return normalized_level in {"HIGH", "CRITICAL"} or normalized_action in {"HOLD_FOR_REVIEW", "PND_OR_BLOCK"}
+
+
+def audit_log(
+    cursor,
+    organization_id: int,
+    case_id: int | None,
+    transaction_id: str | None,
+    user_id: str | None,
+    action_taken: str,
+    previous_status: str | None = None,
+    new_status: str | None = None,
+    analyst_note: str | None = None,
+):
+    cursor.execute("""
+        INSERT INTO fraud_audit_logs (
+            organization_id, case_id, transaction_id, user_id, action_taken,
+            previous_status, new_status, analyst_note
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    """, (
+        organization_id,
+        case_id,
+        transaction_id,
+        user_id,
+        action_taken,
+        previous_status,
+        new_status,
+        analyst_note,
+    ))
 
 
 def materialize_cases_from_alerts(cursor, organization_id: int | None = None):
@@ -636,16 +706,26 @@ def materialize_cases_from_alerts(cursor, organization_id: int | None = None):
             risk_score,
             risk_level,
             recommended_action,
+            confidence,
+            transaction_id,
+            transaction_direction,
             timestamp
         FROM fraud_alerts
         WHERE (%s IS NULL OR organization_id = %s)
+          AND (risk_level IN ('HIGH', 'CRITICAL') OR recommended_action IN ('HOLD_FOR_REVIEW', 'PND_OR_BLOCK'))
         ORDER BY id ASC
     """, (organization_id, organization_id))
     alerts = cursor.fetchall()
     for alert in alerts:
-        alert_id, alert_organization_id, user_id, reason, risk_score, risk_level, recommended_action, timestamp = alert
+        (
+            alert_id, alert_organization_id, user_id, reason, risk_score, risk_level,
+            recommended_action, confidence, transaction_id, transaction_direction, timestamp
+        ) = alert
         cursor.execute("SELECT id FROM cases WHERE fraud_alert_id = %s", (alert_id,))
         if cursor.fetchone():
+            continue
+        action = recommended_action or recommended_action_from_risk(risk_level)
+        if not should_create_case(risk_level, action):
             continue
 
         cursor.execute("""
@@ -654,26 +734,34 @@ def materialize_cases_from_alerts(cursor, organization_id: int | None = None):
                 organization_id,
                 fraud_alert_id,
                 user_id,
+                transaction_id,
+                transaction_direction,
                 reason,
                 risk_score,
                 risk_level,
+                confidence,
+                status,
                 priority,
                 recommended_action,
                 created_at,
                 updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
             RETURNING id
         """, (
             f"CASE-{alert_id:04d}",
             alert_organization_id,
             alert_id,
             user_id,
+            transaction_id,
+            transaction_direction or "DEBIT",
             reason or "",
             int(risk_score or 0),
             risk_level or "LOW",
+            float(confidence or 0),
+            "OPEN",
             priority_from_risk(risk_level),
-            recommended_action,
+            action,
             timestamp,
         ))
         case_id = cursor.fetchone()[0]
@@ -681,50 +769,25 @@ def materialize_cases_from_alerts(cursor, organization_id: int | None = None):
             INSERT INTO case_timeline (case_id, event_type, description, actor)
             VALUES (%s, %s, %s, %s)
         """, (case_id, "CASE_CREATED", "Case opened from fraud alert", "System"))
-
-    auto_close_high_risk_cases(cursor, organization_id)
+        audit_log(
+            cursor,
+            int(alert_organization_id),
+            case_id,
+            transaction_id,
+            user_id,
+            "CASE_CREATED",
+            None,
+            "OPEN",
+            "Case opened for banking fraud review",
+        )
+        if action == "HOLD_FOR_REVIEW":
+            audit_log(cursor, int(alert_organization_id), case_id, transaction_id, user_id, "TRANSACTION_HELD", None, "OPEN")
+        elif action == "PND_OR_BLOCK":
+            audit_log(cursor, int(alert_organization_id), case_id, transaction_id, user_id, "TRANSACTION_BLOCKED", None, "OPEN")
 
 
 def auto_close_high_risk_cases(cursor, organization_id: int | None = None):
-    cursor.execute("""
-        SELECT id, risk_level, recommended_action, analyst_feedback, decision
-        FROM cases
-        WHERE (%s IS NULL OR organization_id = %s)
-          AND risk_level IN ('HIGH', 'CRITICAL')
-          AND status NOT IN ('RESOLVED', 'ARCHIVED')
-    """, (organization_id, organization_id))
-    rows = cursor.fetchall()
-    for case_id, risk_level, recommended_action, analyst_feedback, decision in rows:
-        auto_decision = "FREEZE" if risk_level == "CRITICAL" else "BLOCK"
-        auto_reason = (
-            "System auto-closed as confirmed high-confidence fraud. "
-            f"{recommended_action or recommended_action_from_risk(risk_level)} was applied immediately; analyst review is not required for this risk tier."
-        )
-        cursor.execute("""
-            UPDATE cases
-            SET status = 'RESOLVED',
-                analyst_feedback = COALESCE(%s, analyst_feedback),
-                decision = COALESCE(%s, decision),
-                resolved_at = COALESCE(resolved_at, CURRENT_TIMESTAMP),
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = %s
-        """, (analyst_feedback or "TRUE_FRAUD", decision or auto_decision, case_id))
-        cursor.execute("""
-            INSERT INTO case_notes (case_id, author, note)
-            SELECT %s, 'System', %s
-            WHERE NOT EXISTS (
-                SELECT 1 FROM case_notes
-                WHERE case_id = %s AND author = 'System' AND note = %s
-            )
-        """, (case_id, auto_reason, case_id, auto_reason))
-        cursor.execute("""
-            INSERT INTO case_timeline (case_id, event_type, description, actor)
-            SELECT %s, 'AUTO_PND_CLOSURE', %s, 'System'
-            WHERE NOT EXISTS (
-                SELECT 1 FROM case_timeline
-                WHERE case_id = %s AND event_type = 'AUTO_PND_CLOSURE'
-            )
-        """, (case_id, f"{risk_level} risk auto-PND decision completed and case closed", case_id))
+    return
 
 
 def timeline(cursor, case_id: int, event_type: str, description: str, actor: str):
@@ -739,14 +802,18 @@ def row_to_case_summary(row) -> CaseSummaryResponse:
         id=row[0],
         case_number=row[1],
         user_id=row[2],
-        risk_score=row[3],
-        risk_level=row[4],
-        status=row[5],
-        priority=row[6],
-        assigned_to=row[7],
-        analyst_feedback=row[8],
-        created_at=str(row[9]),
-        updated_at=str(row[10]),
+        transaction_id=row[3],
+        transaction_direction=row[4],
+        risk_score=row[5],
+        risk_level=row[6],
+        confidence=float(row[7]) if row[7] is not None else None,
+        recommended_action=row[8],
+        status=row[9],
+        priority=row[10],
+        assigned_to=row[11],
+        analyst_feedback=row[12],
+        created_at=str(row[13]),
+        updated_at=str(row[14]),
     )
 
 
@@ -2396,20 +2463,21 @@ def risk_response_from_row(row) -> RiskScoreResponse:
     return RiskScoreResponse(
         decision_id=row[0],
         transaction_id=row[1],
-        user_id=row[2],
-        risk_score=row[3],
-        risk_level=row[4],
-        action=row[5],
-        recommendation=row[6] or row[5],
-        confidence=float(row[7] or 0),
-        reasons=row[8] or [],
-        signals=row[9] or [],
-        behavioral_match=bool(row[10]),
-        device_intelligence=row[11],
-        account_takeover=row[12],
-        action_decision_id=row[13],
-        matched_rules=row[14] or [],
-        created_at=str(row[15]),
+        transaction_direction=row[2] or "DEBIT",
+        user_id=row[3],
+        risk_score=row[4],
+        risk_level=row[5],
+        action=row[6],
+        recommendation=row[7] or row[6],
+        confidence=float(row[8] or 0),
+        reasons=row[9] or [],
+        signals=row[10] or [],
+        behavioral_match=bool(row[11]),
+        device_intelligence=row[12],
+        account_takeover=row[13],
+        action_decision_id=row[14],
+        matched_rules=row[15] or [],
+        created_at=str(row[16]),
     )
 
 
@@ -2425,6 +2493,7 @@ async def score_risk(
     event = payload.model_dump()
     event["device_type"] = payload.device_type or payload.device or ""
     event["timestamp"] = payload.timestamp or datetime.utcnow().isoformat()
+    event["transaction_direction"] = payload.transaction_direction
     transaction_id = payload.transaction_id or f"txn_{secrets.token_hex(10)}"
     source = f"{client['type']}:{client['name']}"
 
@@ -2434,7 +2503,7 @@ async def score_risk(
 
     if idempotency_key:
         cursor.execute("""
-            SELECT id, transaction_id, user_id, risk_score, risk_level, action, recommendation, confidence,
+            SELECT id, transaction_id, transaction_direction, user_id, risk_score, risk_level, action, recommendation, confidence,
                    reasons, signals, behavioral_match, device_intelligence, account_takeover,
                    action_decision_id, matched_rules, created_at
             FROM risk_decisions
@@ -2464,6 +2533,8 @@ async def score_risk(
         result["reason"] = ", ".join(result["reasons"])
         result["risk_score"] = min(100, result["risk_score"] + shared_signal["points"])
         result["risk_level"] = "CRITICAL" if result["risk_score"] >= 90 else "HIGH" if result["risk_score"] >= 70 else "MEDIUM"
+        result["recommendation"] = recommended_action_from_risk(result["risk_level"])
+        result["action"] = result["recommendation"]
     action_evaluation = evaluate_decision_rules(cursor, organization_id, event, result, device_data)
     persist_device_intelligence(cursor, organization_id, payload.user_id, event, device_data, result)
     persist_account_security_state(
@@ -2494,17 +2565,27 @@ async def score_risk(
         "accounts_from_device": payload.accounts_from_device,
         "registration_count": payload.registration_count,
         "automation_score": payload.automation_score,
+        "repeated_failed_payments": payload.repeated_failed_payments,
+        "rapid_credit_count": payload.rapid_credit_count,
+        "different_sender_count": payload.different_sender_count,
+        "debits_after_credit_count": payload.debits_after_credit_count,
+        "dormant_days": payload.dormant_days,
+        "credit_frequency_count": payload.credit_frequency_count,
+        "suspicious_sender": payload.suspicious_sender,
+        "chargeback_risk": payload.chargeback_risk,
+        "channel": payload.channel,
     }
 
     cursor.execute("""
         INSERT INTO events (
-            organization_id, transaction_id, user_id, amount, location, event_type, device_type,
+            organization_id, transaction_id, transaction_direction, user_id, amount, location, event_type, device_type,
             device_id, network, ip, timestamp, metadata, source
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         organization_id,
         transaction_id,
+        payload.transaction_direction,
         payload.user_id,
         payload.amount,
         payload.location,
@@ -2520,18 +2601,19 @@ async def score_risk(
 
     cursor.execute("""
         INSERT INTO risk_decisions (
-            organization_id, transaction_id, idempotency_key, user_id, risk_score, risk_level,
+            organization_id, transaction_id, transaction_direction, idempotency_key, user_id, risk_score, risk_level,
             action, recommendation, confidence, reasons, signals, behavioral_match,
             request_payload, source, learned, device_intelligence, account_takeover
             , matched_rules
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        RETURNING id, transaction_id, user_id, risk_score, risk_level, action,
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id, transaction_id, transaction_direction, user_id, risk_score, risk_level, action,
                   recommendation, confidence, reasons, signals, behavioral_match,
                   device_intelligence, account_takeover, action_decision_id, matched_rules, created_at
     """, (
         organization_id,
         transaction_id,
+        payload.transaction_direction,
         idempotency_key,
         payload.user_id,
         result["risk_score"],
@@ -2572,20 +2654,22 @@ async def score_risk(
         "UPDATE risk_decisions SET action_decision_id = %s WHERE id = %s",
         (action_decision_id, decision_row[0]),
     )
-    decision_row = (*decision_row[:13], action_decision_id, decision_row[14], decision_row[15])
+    decision_row = (*decision_row[:14], action_decision_id, decision_row[15], decision_row[16])
 
     alert = None
     if result["risk_score"] >= 40 or result["action"] != "ALLOW":
         cursor.execute("""
             INSERT INTO fraud_alerts (
-                organization_id, risk_decision_id, user_id, reason, risk_score, risk_level, timestamp,
+                organization_id, risk_decision_id, transaction_id, transaction_direction, user_id, reason, risk_score, risk_level, timestamp,
                 recommended_action, confidence, signals_triggered, behavioral_match
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
             organization_id,
             decision_row[0],
+            transaction_id,
+            payload.transaction_direction,
             payload.user_id,
             result["reason"],
             result["risk_score"],
@@ -2600,6 +2684,8 @@ async def score_risk(
         materialize_cases_from_alerts(cursor, organization_id)
         alert = {
             "id": alert_id,
+            "transaction_id": transaction_id,
+            "transaction_direction": payload.transaction_direction,
             "user_id": payload.user_id,
             "reason": result["reason"],
             "risk_score": str(result["risk_score"]),
@@ -2689,17 +2775,19 @@ async def create_demo_fraud_event(
     recommended_action = recommended_action_from_risk(risk_level)
     signals_triggered = 0 if reason == "Normal activity" else len([item for item in reason.split(",") if item.strip()])
     behavioral_match = risk_score < 40
-    confidence = min(99, max(55, risk_score + 4))
+    confidence = float(result["confidence"])
+    transaction_id = f"demo-{secrets.token_hex(4)}"
 
     conn, cursor = get_db()
     prepare_analytics_tables(cursor)
     organization_id = current_user.organization_id or default_organization_id(cursor)
     cursor.execute("""
-        INSERT INTO events (organization_id, transaction_id, user_id, amount, location, event_type, device_type, network, ip, timestamp)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO events (organization_id, transaction_id, transaction_direction, user_id, amount, location, event_type, device_type, network, ip, timestamp)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         organization_id,
-        f"demo-{secrets.token_hex(4)}",
+        transaction_id,
+        payload.transaction_direction,
         payload.user_id,
         payload.amount,
         payload.location,
@@ -2712,6 +2800,8 @@ async def create_demo_fraud_event(
     cursor.execute("""
         INSERT INTO fraud_alerts (
             organization_id,
+            transaction_id,
+            transaction_direction,
             user_id,
             reason,
             risk_score,
@@ -2722,10 +2812,12 @@ async def create_demo_fraud_event(
             signals_triggered,
             behavioral_match
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
     """, (
         organization_id,
+        transaction_id,
+        payload.transaction_direction,
         payload.user_id,
         reason,
         risk_score,
@@ -2742,6 +2834,8 @@ async def create_demo_fraud_event(
     conn.close()
 
     alert = FraudAlertResponse(
+        transaction_id=transaction_id,
+        transaction_direction=payload.transaction_direction,
         user_id=payload.user_id,
         reason=reason,
         timestamp=event["timestamp"],
@@ -2794,6 +2888,8 @@ def get_fraud(limit: int = Query(50), current_user: AuthUserResponse = Depends(g
             c.status,
             c.analyst_feedback,
             latest_note.note,
+            f.transaction_id,
+            f.transaction_direction,
             f.user_id,
             f.reason,
             f.timestamp,
@@ -2828,15 +2924,17 @@ def get_fraud(limit: int = Query(50), current_user: AuthUserResponse = Depends(g
             case_status=r[3],
             analyst_feedback=r[4],
             closure_note=r[5],
-            user_id=r[6],
-            reason=r[7],
-            timestamp=str(r[8]),
-            risk_score=str(r[9]),
-            risk_level=r[10],
-            recommended_action=r[11],
-            confidence=float(r[12]) if r[12] is not None else None,
-            signals_triggered=r[13],
-            behavioral_match=r[14]
+            transaction_id=r[6],
+            transaction_direction=r[7],
+            user_id=r[8],
+            reason=r[9],
+            timestamp=str(r[10]),
+            risk_score=str(r[11]),
+            risk_level=r[12],
+            recommended_action=r[13],
+            confidence=float(r[14]) if r[14] is not None else None,
+            signals_triggered=r[15],
+            behavioral_match=r[16]
         )
         for r in rows
     ]
@@ -3173,8 +3271,12 @@ def get_cases(
             id,
             case_number,
             user_id,
+            transaction_id,
+            transaction_direction,
             risk_score,
             risk_level,
+            confidence,
+            recommended_action,
             status,
             priority,
             assigned_to,
@@ -3215,8 +3317,12 @@ def get_case(case_id: int, current_user: AuthUserResponse = Depends(get_current_
             id,
             case_number,
             user_id,
+            transaction_id,
+            transaction_direction,
             risk_score,
             risk_level,
+            confidence,
+            recommended_action,
             status,
             priority,
             assigned_to,
@@ -3253,17 +3359,16 @@ def get_case(case_id: int, current_user: AuthUserResponse = Depends(get_current_
     timeline_rows = cursor.fetchall()
     conn.close()
 
-    summary = row_to_case_summary(row[:11])
-    reason = row[11] or ""
+    summary = row_to_case_summary(row[:15])
+    reason = row[15] or ""
     return CaseDetailResponse(
         **summary.model_dump(),
         reason=reason,
-        recommended_action=row[12],
-        decision=row[13],
-        potential_loss=float(row[14]) if row[14] is not None else None,
-        actual_loss=float(row[15]) if row[15] is not None else None,
+        decision=row[17],
+        potential_loss=float(row[18]) if row[18] is not None else None,
+        actual_loss=float(row[19]) if row[19] is not None else None,
         fraud_signals=parse_reasons(reason),
-        score_breakdown=build_score_breakdown(reason, row[3]),
+        score_breakdown=build_score_breakdown(reason, row[5]),
         notes=[
             CaseNoteResponse(id=r[0], author=r[1], note=r[2], created_at=str(r[3]))
             for r in note_rows
@@ -3425,6 +3530,139 @@ def add_case_note(case_id: int, payload: CaseNoteRequest, current_user: AuthUser
     conn.commit()
     conn.close()
     return get_case(case_id, current_user)
+
+
+def perform_case_action(
+    case_id: int,
+    new_status: str,
+    action_taken: str,
+    current_user: AuthUserResponse,
+    note: str | None = None,
+    feedback: str | None = None,
+    decision: str | None = None,
+) -> CaseActionResponse:
+    conn, cursor = get_db()
+    ensure_case_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    cursor.execute("""
+        SELECT id, status, transaction_id, user_id, fraud_alert_id
+        FROM cases
+        WHERE id = %s AND organization_id = %s
+    """, (case_id, organization_id))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    _, previous_status, transaction_id, user_id, fraud_alert_id = row
+    set_clauses = ["status = %s", "updated_at = CURRENT_TIMESTAMP"]
+    params = [new_status]
+    if feedback:
+        set_clauses.append("analyst_feedback = %s")
+        params.append(feedback)
+    if decision:
+        set_clauses.append("decision = %s")
+        params.append(decision)
+    if note:
+        set_clauses.append("analyst_note = %s")
+        params.append(note)
+    if new_status in {"CONFIRMED_FRAUD", "FALSE_POSITIVE", "REVERSED", "CLOSED", "RESOLVED"}:
+        set_clauses.append("resolved_at = COALESCE(resolved_at, CURRENT_TIMESTAMP)")
+    if new_status == "REVERSED":
+        set_clauses.append("reversed_at = CURRENT_TIMESTAMP")
+    params.extend([case_id, organization_id])
+    cursor.execute(f"""
+        UPDATE cases
+        SET {', '.join(set_clauses)}
+        WHERE id = %s AND organization_id = %s
+    """, params)
+
+    if note:
+        cursor.execute("""
+            INSERT INTO case_notes (case_id, author, note)
+            VALUES (%s, %s, %s)
+        """, (case_id, current_user.name, note))
+    timeline(cursor, case_id, action_taken, f"{action_taken.replace('_', ' ').title()} by {current_user.name}", current_user.name)
+    audit_log(cursor, organization_id, case_id, transaction_id, user_id, action_taken, previous_status, new_status, note)
+
+    if feedback and fraud_alert_id:
+        cursor.execute("""
+            UPDATE risk_decisions d
+            SET analyst_feedback = %s, feedback_at = CURRENT_TIMESTAMP
+            FROM fraud_alerts f
+            WHERE f.risk_decision_id = d.id AND f.id = %s
+        """, (feedback, fraud_alert_id))
+
+    conn.commit()
+    conn.close()
+    return CaseActionResponse(
+        message={
+            "CASE_REVIEWED": "Case moved to analyst review",
+            "CONFIRMED_FRAUD": "Case confirmed as fraud",
+            "MARKED_FALSE_POSITIVE": "Case marked as false positive",
+            "REVERSED": "Transaction restriction reversed successfully",
+            "CLOSED": "Case closed successfully",
+        }.get(action_taken, "Case updated successfully"),
+        case_id=str(case_id),
+        transaction_id=transaction_id,
+        status=new_status,
+    )
+
+
+@app.post("/cases/{case_id}/review", response_model=CaseActionResponse)
+def review_case(case_id: int, payload: CaseActionRequest, current_user: AuthUserResponse = Depends(get_current_user)):
+    return perform_case_action(case_id, "UNDER_REVIEW", "CASE_REVIEWED", current_user, payload.analyst_note)
+
+
+@app.post("/cases/{case_id}/confirm-fraud", response_model=CaseActionResponse)
+def confirm_case_fraud(case_id: int, payload: CaseActionRequest, current_user: AuthUserResponse = Depends(get_current_user)):
+    return perform_case_action(case_id, "CONFIRMED_FRAUD", "CONFIRMED_FRAUD", current_user, payload.analyst_note, "TRUE_FRAUD", "PND_OR_BLOCK")
+
+
+@app.post("/cases/{case_id}/false-positive", response_model=CaseActionResponse)
+def mark_case_false_positive(case_id: int, payload: CaseActionRequest, current_user: AuthUserResponse = Depends(get_current_user)):
+    return perform_case_action(case_id, "FALSE_POSITIVE", "MARKED_FALSE_POSITIVE", current_user, payload.analyst_note, "FALSE_POSITIVE", "ALLOW")
+
+
+@app.post("/cases/{case_id}/reverse", response_model=CaseActionResponse)
+def reverse_case_restriction(case_id: int, payload: CaseActionRequest, current_user: AuthUserResponse = Depends(get_current_user)):
+    return perform_case_action(case_id, "REVERSED", "REVERSED", current_user, payload.analyst_note, "FALSE_POSITIVE", "ALLOW")
+
+
+@app.post("/cases/{case_id}/close", response_model=CaseActionResponse)
+def close_case(case_id: int, payload: CaseActionRequest, current_user: AuthUserResponse = Depends(get_current_user)):
+    return perform_case_action(case_id, "CLOSED", "CLOSED", current_user, payload.analyst_note)
+
+
+@app.get("/audit-logs", response_model=list[AuditLogResponse])
+def get_audit_logs(limit: int = Query(100), current_user: AuthUserResponse = Depends(get_current_user)):
+    conn, cursor = get_db()
+    ensure_case_tables(cursor)
+    organization_id = current_user.organization_id or default_organization_id(cursor)
+    cursor.execute("""
+        SELECT id, case_id, transaction_id, user_id, action_taken,
+               previous_status, new_status, analyst_note, created_at
+        FROM fraud_audit_logs
+        WHERE organization_id = %s
+        ORDER BY id DESC
+        LIMIT %s
+    """, (organization_id, limit))
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        AuditLogResponse(
+            id=row[0],
+            case_id=row[1],
+            transaction_id=row[2],
+            user_id=row[3],
+            action_taken=row[4],
+            previous_status=row[5],
+            new_status=row[6],
+            analyst_note=row[7],
+            created_at=str(row[8]),
+        )
+        for row in rows
+    ]
 
 
 @app.get("/analytics/overview", response_model=AnalyticsOverviewResponse)

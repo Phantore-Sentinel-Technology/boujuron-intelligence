@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Bot, Gauge, LockKeyhole, ShieldAlert, ShieldCheck, UserRoundSearch } from "lucide-react";
+import { Activity, AlertTriangle, Gauge, RotateCcw, ShieldAlert, ShieldCheck, UserRoundSearch, XCircle } from "lucide-react";
 import { useMemo } from "react";
 import type { AlertStats, FraudAlert } from "../types";
 import { StatCard } from "../components/StatCard";
@@ -28,10 +28,12 @@ export function Dashboard({ alerts, topAlerts, stats, loading, reloadAlerts }: D
       </section>
 
       <section className="ops-grid">
-        <StatCard label="Open investigations" value={operational.openInvestigations} hint="analyst workload" icon={UserRoundSearch} tone="warn" />
-        <StatCard label="Blocked today" value={operational.blockedToday} hint="auto-PND / freeze" icon={LockKeyhole} tone="danger" />
-        <StatCard label="ATO attempts" value={operational.atoAttempts} hint="account takeover signals" icon={ShieldAlert} tone="danger" />
-        <StatCard label="Bot attacks" value={operational.botAttempts} hint="credential abuse patterns" icon={Bot} tone="warn" />
+        <StatCard label="Total cases" value={operational.totalCases} hint="banking review queue" icon={UserRoundSearch} tone="warn" />
+        <StatCard label="Open cases" value={operational.openInvestigations} hint="analyst workload" icon={AlertTriangle} tone="warn" />
+        <StatCard label="Critical cases" value={operational.criticalCases} hint="PND/block candidates" icon={ShieldAlert} tone="danger" />
+        <StatCard label="High risk cases" value={operational.highCases} hint="hold for review" icon={Gauge} tone="warn" />
+        <StatCard label="False positives" value={operational.falsePositives} hint="customer friction reduced" icon={XCircle} />
+        <StatCard label="Reversed" value={operational.reversedTransactions} hint="restrictions lifted" icon={RotateCcw} tone="good" />
       </section>
 
       <div className="analytics-grid">
@@ -48,15 +50,14 @@ export function Dashboard({ alerts, topAlerts, stats, loading, reloadAlerts }: D
 }
 
 function buildOperationalMetrics(alerts: FraudAlert[]) {
-  const today = new Date().toISOString().slice(0, 10);
-  const openInvestigations = alerts.filter((alert) => alert.case_status && !["RESOLVED", "ARCHIVED"].includes(alert.case_status)).length;
-  const blockedToday = alerts.filter((alert) => {
-    const action = (alert.recommended_action || "").toUpperCase();
-    const isToday = alert.timestamp?.slice(0, 10) === today;
-    return isToday && (alert.risk_level === "CRITICAL" || action.includes("BLOCK") || action.includes("FREEZE") || action.includes("PND"));
-  }).length;
-  const atoAttempts = alerts.filter((alert) => /account takeover|password|sim swap|new device|failed login|login velocity|beneficiary/i.test(alert.reason)).length;
-  const botAttempts = alerts.filter((alert) => /bot|credential|automation|failed login|many accounts|registrations|velocity/i.test(alert.reason)).length;
+  const caseAlerts = alerts.filter((alert) => alert.case_id);
+  const closedStatuses = ["RESOLVED", "ARCHIVED", "CONFIRMED_FRAUD", "FALSE_POSITIVE", "REVERSED", "CLOSED"];
+  const totalCases = new Set(caseAlerts.map((alert) => alert.case_id)).size;
+  const openInvestigations = caseAlerts.filter((alert) => !closedStatuses.includes(alert.case_status || "")).length;
+  const criticalCases = caseAlerts.filter((alert) => alert.risk_level === "CRITICAL").length;
+  const highCases = caseAlerts.filter((alert) => alert.risk_level === "HIGH").length;
+  const falsePositives = caseAlerts.filter((alert) => alert.case_status === "FALSE_POSITIVE" || alert.analyst_feedback === "FALSE_POSITIVE").length;
+  const reversedTransactions = caseAlerts.filter((alert) => alert.case_status === "REVERSED").length;
 
-  return { openInvestigations, blockedToday, atoAttempts, botAttempts };
+  return { totalCases, openInvestigations, criticalCases, highCases, falsePositives, reversedTransactions };
 }

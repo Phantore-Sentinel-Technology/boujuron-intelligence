@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { CheckCircle2, ChevronRight, Search } from "lucide-react";
-import type { AnalystFeedback, CaseDecision, FraudAlert, RiskLevel } from "../types";
+import type { FraudAlert, RiskLevel } from "../types";
 import { RiskBadge } from "./RiskBadge";
 import { AlertDrawer } from "./AlertDrawer";
-import { addCaseNote, updateCase } from "../services/api";
+import { closeCaseWorkflow, confirmFraudCase, markFalsePositiveCase, reverseCaseRestriction, reviewCase } from "../services/api";
 
 const risks: Array<"ALL" | RiskLevel> = ["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW"];
 
@@ -65,15 +65,17 @@ export function FraudTable({ alerts, loading, onChanged }: FraudTableProps) {
           <thead>
             <tr>
               <th>User</th>
-              <th>Score</th>
-              <th>Risk</th>
-              <th>Confidence</th>
-              <th>Signals</th>
-              <th>Action</th>
-              <th>Tags</th>
+              <th>Transaction ID</th>
+              <th>Direction</th>
               <th>Reason</th>
+              <th>Score</th>
+              <th>Confidence</th>
+              <th>Risk</th>
+              <th>Recommended Action</th>
+              <th>Tags</th>
               <th>Time</th>
-              <th>Closure</th>
+              <th>Case Status</th>
+              <th>Analyst Action</th>
               <th />
             </tr>
           </thead>
@@ -81,18 +83,22 @@ export function FraudTable({ alerts, loading, onChanged }: FraudTableProps) {
             {filtered.map((alert) => (
               <tr key={`${alert.user_id}-${alert.timestamp}-${alert.risk_score}`} onClick={() => setSelected(alert)}>
                 <td className="strong">{alert.user_id}</td>
-                <td>{alert.risk_score}</td>
-                <td><RiskBadge level={alert.risk_level} /></td>
-                <td>{formatConfidence(alert.confidence)}</td>
-                <td>{alert.signals_triggered ?? countReasons(alert.reason)}</td>
-                <td className="action-cell">{formatAction(alert.recommended_action)}</td>
-                <td><AlertTags alert={alert} /></td>
+                <td className="mono-cell">{alert.transaction_id || "N/A"}</td>
+                <td><span className="direction-pill">{alert.transaction_direction || "DEBIT"}</span></td>
                 <td className="reason-cell">
                   <span className="drawer-detail-cue">See investigation drawer detail</span>
                 </td>
+                <td>{alert.risk_score}</td>
+                <td>{formatConfidence(alert.confidence)}</td>
+                <td><RiskBadge level={alert.risk_level} /></td>
+                <td className="action-cell">{formatAction(alert.recommended_action)}</td>
+                <td><AlertTags alert={alert} /></td>
                 <td>{formatTime(alert.timestamp)}</td>
                 <td>
-                  <ClosureControl alert={alert} onChanged={onChanged} />
+                  <CaseStatusBadge alert={alert} />
+                </td>
+                <td>
+                  <AnalystActions alert={alert} onChanged={onChanged} />
                 </td>
                 <td><ChevronRight size={16} /></td>
               </tr>
@@ -114,23 +120,23 @@ export function FraudTable({ alerts, loading, onChanged }: FraudTableProps) {
   );
 }
 
-function ClosureControl({ alert, onChanged }: { alert: FraudAlert; onChanged?: () => Promise<void> }) {
-  const [feedback, setFeedback] = useState<AnalystFeedback>(alert.risk_level === "LOW" ? "FALSE_POSITIVE" : "TRUE_FRAUD");
-  const [decision, setDecision] = useState<CaseDecision>(alert.risk_level === "LOW" ? "ALLOW" : alert.risk_level === "MEDIUM" ? "VERIFY" : "BLOCK");
+function AnalystActions({ alert, onChanged }: { alert: FraudAlert; onChanged?: () => Promise<void> }) {
   const [comment, setComment] = useState("");
   const [saving, setSaving] = useState(false);
-  const closed = alert.case_status === "RESOLVED" || alert.case_status === "ARCHIVED";
+  const closed = isClosed(alert.case_status);
+  const reversible = canReverse(alert);
 
-  async function closeCase() {
-    if (!alert.case_id || !comment.trim()) return;
+  async function runAction(action: "review" | "confirm" | "false-positive" | "reverse" | "close") {
+    if (!alert.case_id) return;
     setSaving(true);
     try {
-      await updateCase(alert.case_id, {
-        status: "RESOLVED",
-        analyst_feedback: feedback,
-        decision,
-      });
-      await addCaseNote(alert.case_id, `Dashboard closure: ${comment.trim()}`);
+      const note = comment.trim() || undefined;
+      if (action === "review") await reviewCase(alert.case_id, note);
+      if (action === "confirm") await confirmFraudCase(alert.case_id, note);
+      if (action === "false-positive") await markFalsePositiveCase(alert.case_id, note);
+      if (action === "reverse") await reverseCaseRestriction(alert.case_id, note);
+      if (action === "close") await closeCaseWorkflow(alert.case_id, note);
+      setComment("");
       await onChanged?.();
     } finally {
       setSaving(false);
@@ -143,32 +149,29 @@ function ClosureControl({ alert, onChanged }: { alert: FraudAlert; onChanged?: (
         <span className="closure-done"><CheckCircle2 size={14} /> Closed</span>
       ) : (
         <>
-          <div className="closure-selects">
-            <select value={feedback} onChange={(event) => setFeedback(event.target.value as AnalystFeedback)}>
-              <option value="TRUE_FRAUD">True Fraud</option>
-              <option value="FALSE_POSITIVE">False Positive</option>
-              <option value="NEEDS_REVIEW">Needs Review</option>
-            </select>
-            <select value={decision} onChange={(event) => setDecision(event.target.value as CaseDecision)}>
-              <option value="BLOCK">Block/PND</option>
-              <option value="FREEZE">Freeze</option>
-              <option value="VERIFY">Verify</option>
-              <option value="ALLOW">Allow</option>
-              <option value="ESCALATE">Escalate</option>
-            </select>
-          </div>
           <input
             value={comment}
             onChange={(event) => setComment(event.target.value)}
-            placeholder="Closure comment"
+            placeholder="Analyst note"
           />
-          <button className="closure-button" disabled={!alert.case_id || !comment.trim() || saving} onClick={closeCase}>
-            {saving ? "Closing..." : "Close"}
-          </button>
+          <div className="case-action-buttons">
+            <button disabled={!alert.case_id || saving} onClick={() => runAction("review")}>Review</button>
+            <button disabled={!alert.case_id || saving} onClick={() => runAction("confirm")}>Confirm Fraud</button>
+            <button disabled={!alert.case_id || saving} onClick={() => runAction("false-positive")}>False Positive</button>
+            {reversible && <button disabled={!alert.case_id || saving} onClick={() => runAction("reverse")}>Reverse</button>}
+            <button className="closure-button" disabled={!alert.case_id || saving} onClick={() => runAction("close")}>
+              {saving ? "Saving..." : "Close"}
+            </button>
+          </div>
         </>
       )}
     </div>
   );
+}
+
+function CaseStatusBadge({ alert }: { alert: FraudAlert }) {
+  if (!alert.case_id) return <span className="muted-text">No case</span>;
+  return <span className={isClosed(alert.case_status) ? "closure-done" : "case-open"}>{alert.case_status || "OPEN"}</span>;
 }
 
 function AlertTags({ alert }: { alert: FraudAlert }) {
@@ -191,6 +194,15 @@ function formatAction(action?: string | null) {
 function formatConfidence(confidence?: number | null) {
   if (confidence === null || confidence === undefined) return "N/A";
   return `${Math.round(confidence > 1 ? confidence : confidence * 100)}%`;
+}
+
+function isClosed(status?: string | null) {
+  return ["RESOLVED", "ARCHIVED", "CONFIRMED_FRAUD", "FALSE_POSITIVE", "REVERSED", "CLOSED"].includes(status || "");
+}
+
+function canReverse(alert: FraudAlert) {
+  const action = (alert.recommended_action || "").toUpperCase();
+  return Boolean(alert.case_id) && !isClosed(alert.case_status) && (action.includes("HOLD") || action.includes("PND") || action.includes("BLOCK"));
 }
 
 function formatTime(timestamp: string) {

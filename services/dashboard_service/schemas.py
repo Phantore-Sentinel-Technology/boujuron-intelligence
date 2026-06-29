@@ -218,6 +218,7 @@ class BehaviorEvaluationResponse(BaseModel):
 class RiskScoreRequest(BaseModel):
     user_id: str = Field(min_length=1, max_length=160)
     amount: float = Field(default=0, ge=0)
+    transaction_direction: str = "DEBIT"
     device: str | None = None
     device_type: str | None = None
     device_id: str | None = None
@@ -248,6 +249,15 @@ class RiskScoreRequest(BaseModel):
     accounts_from_device: int = Field(default=0, ge=0)
     registration_count: int = Field(default=0, ge=0)
     automation_score: int = Field(default=0, ge=0, le=100)
+    repeated_failed_payments: bool = False
+    rapid_credit_count: int = Field(default=0, ge=0)
+    different_sender_count: int = Field(default=0, ge=0)
+    debits_after_credit_count: int = Field(default=0, ge=0)
+    dormant_days: int = Field(default=0, ge=0)
+    credit_frequency_count: int = Field(default=0, ge=0)
+    suspicious_sender: bool = False
+    chargeback_risk: bool = False
+    channel: str | None = None
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -261,6 +271,14 @@ class RiskScoreRequest(BaseModel):
             except ValueError as exc:
                 raise ValueError("timestamp must be ISO 8601") from exc
         return value
+
+    @field_validator("transaction_direction")
+    @classmethod
+    def validate_transaction_direction(cls, value):
+        normalized = value.upper().strip()
+        if normalized not in {"DEBIT", "CREDIT"}:
+            raise ValueError("transaction_direction must be DEBIT or CREDIT")
+        return normalized
 
 
 class RiskSignalResponse(BaseModel):
@@ -345,6 +363,7 @@ class RiskScoreResponse(BaseModel):
     decision_id: int
     user_id: str
     transaction_id: str
+    transaction_direction: str | None = None
     risk_score: int
     risk_level: str
     action: str
@@ -375,6 +394,8 @@ class FraudAlertResponse(BaseModel):
     case_status: str | None = None
     analyst_feedback: str | None = None
     closure_note: str | None = None
+    transaction_id: str | None = None
+    transaction_direction: str | None = None
     user_id: str
     reason: str
     timestamp: str
@@ -388,6 +409,7 @@ class FraudAlertResponse(BaseModel):
 
 class DemoFraudEventRequest(BaseModel):
     user_id: str = "acct_501"
+    transaction_direction: str = "DEBIT"
     event_type: str = "large_transfer"
     device_type: str = "rooted device"
     ip: str = "45.90.12.10"
@@ -395,6 +417,14 @@ class DemoFraudEventRequest(BaseModel):
     amount: float = 2500000
     location: str = "russia"
     network: str = "TOR"
+
+    @field_validator("transaction_direction")
+    @classmethod
+    def validate_transaction_direction(cls, value):
+        normalized = value.upper().strip()
+        if normalized not in {"DEBIT", "CREDIT"}:
+            raise ValueError("transaction_direction must be DEBIT or CREDIT")
+        return normalized
 
 
 class ScoreBreakdownItem(BaseModel):
@@ -494,8 +524,12 @@ class CaseSummaryResponse(BaseModel):
     id: int
     case_number: str
     user_id: str
+    transaction_id: str | None = None
+    transaction_direction: str | None = None
     risk_score: int
     risk_level: str
+    confidence: float | None = None
+    recommended_action: str | None = None
     status: CaseStatus
     priority: CasePriority
     assigned_to: str | None = None
@@ -543,6 +577,29 @@ class CaseUpdateRequest(BaseModel):
 
 class CaseNoteRequest(BaseModel):
     note: str
+
+
+class CaseActionRequest(BaseModel):
+    analyst_note: str | None = None
+
+
+class CaseActionResponse(BaseModel):
+    message: str
+    case_id: str
+    transaction_id: str | None = None
+    status: str
+
+
+class AuditLogResponse(BaseModel):
+    id: int
+    case_id: int | None = None
+    transaction_id: str | None = None
+    user_id: str | None = None
+    action_taken: str
+    previous_status: str | None = None
+    new_status: str | None = None
+    analyst_note: str | None = None
+    created_at: str
 
 
 class NotificationResponse(BaseModel):

@@ -2,11 +2,13 @@ import axios from "axios";
 import type {
   AnalystPerformance,
   AnalyticsOverview,
+  AuditLog,
   AuthResponse,
   AuthUser,
   BehaviorEvaluation,
   BehaviorSettings,
   CaseDetail,
+  CaseActionResponse,
   CaseSummary,
   CaseUpdate,
   ClientApiKey,
@@ -234,6 +236,36 @@ export async function updateCase(caseId: string | number, update: CaseUpdate) {
 
 export async function addCaseNote(caseId: string | number, note: string) {
   const response = await api.post<CaseDetail>(`/cases/${caseId}/notes`, { note });
+  return response.data;
+}
+
+export async function reviewCase(caseId: string | number, analystNote?: string) {
+  const response = await api.post<CaseActionResponse>(`/cases/${caseId}/review`, { analyst_note: analystNote || null });
+  return response.data;
+}
+
+export async function confirmFraudCase(caseId: string | number, analystNote?: string) {
+  const response = await api.post<CaseActionResponse>(`/cases/${caseId}/confirm-fraud`, { analyst_note: analystNote || null });
+  return response.data;
+}
+
+export async function markFalsePositiveCase(caseId: string | number, analystNote?: string) {
+  const response = await api.post<CaseActionResponse>(`/cases/${caseId}/false-positive`, { analyst_note: analystNote || null });
+  return response.data;
+}
+
+export async function reverseCaseRestriction(caseId: string | number, analystNote?: string) {
+  const response = await api.post<CaseActionResponse>(`/cases/${caseId}/reverse`, { analyst_note: analystNote || null });
+  return response.data;
+}
+
+export async function closeCaseWorkflow(caseId: string | number, analystNote?: string) {
+  const response = await api.post<CaseActionResponse>(`/cases/${caseId}/close`, { analyst_note: analystNote || null });
+  return response.data;
+}
+
+export async function getAuditLogs(limit = 100) {
+  const response = await api.get<AuditLog[]>("/audit-logs", { params: { limit } });
   return response.data;
 }
 

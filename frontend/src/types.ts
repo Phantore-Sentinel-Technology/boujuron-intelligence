@@ -7,6 +7,8 @@ export interface FraudAlert {
   case_status?: CaseStatus | null;
   analyst_feedback?: AnalystFeedback | null;
   closure_note?: string | null;
+  transaction_id?: string | null;
+  transaction_direction?: "DEBIT" | "CREDIT" | string | null;
   user_id: string;
   reason: string;
   timestamp: string;
@@ -183,6 +185,7 @@ export interface DecisionRule {
 export interface RiskDecision {
   decision_id: number;
   transaction_id: string;
+  transaction_direction?: "DEBIT" | "CREDIT" | string | null;
   user_id: string;
   risk_score: number;
   risk_level: RiskLevel;
@@ -287,17 +290,33 @@ export interface BehaviorAnomaly {
   detail: string;
 }
 
-export type CaseStatus = "NEW" | "ASSIGNED" | "INVESTIGATING" | "ESCALATED" | "RESOLVED" | "ARCHIVED";
+export type CaseStatus =
+  | "NEW"
+  | "ASSIGNED"
+  | "INVESTIGATING"
+  | "ESCALATED"
+  | "RESOLVED"
+  | "ARCHIVED"
+  | "OPEN"
+  | "UNDER_REVIEW"
+  | "CONFIRMED_FRAUD"
+  | "FALSE_POSITIVE"
+  | "REVERSED"
+  | "CLOSED";
 export type CasePriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type AnalystFeedback = "TRUE_FRAUD" | "FALSE_POSITIVE" | "NEEDS_REVIEW";
-export type CaseDecision = "ALLOW" | "VERIFY" | "BLOCK" | "FREEZE" | "ESCALATE";
+export type CaseDecision = "ALLOW" | "VERIFY" | "BLOCK" | "FREEZE" | "ESCALATE" | "STEP_UP_VERIFY" | "HOLD_FOR_REVIEW" | "PND_OR_BLOCK";
 
 export interface CaseSummary {
   id: number;
   case_number: string;
   user_id: string;
+  transaction_id?: string | null;
+  transaction_direction?: "DEBIT" | "CREDIT" | string | null;
   risk_score: number;
   risk_level: RiskLevel;
+  confidence?: number | null;
+  recommended_action?: string | null;
   status: CaseStatus;
   priority: CasePriority;
   assigned_to?: string | null;
@@ -341,6 +360,25 @@ export interface CaseUpdate {
   decision?: CaseDecision | null;
   potential_loss?: number | null;
   actual_loss?: number | null;
+}
+
+export interface CaseActionResponse {
+  message: string;
+  case_id: string;
+  transaction_id?: string | null;
+  status: CaseStatus;
+}
+
+export interface AuditLog {
+  id: number;
+  case_id?: number | null;
+  transaction_id?: string | null;
+  user_id?: string | null;
+  action_taken: string;
+  previous_status?: string | null;
+  new_status?: string | null;
+  analyst_note?: string | null;
+  created_at: string;
 }
 
 export interface NotificationItem {
