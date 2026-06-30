@@ -742,11 +742,12 @@ def materialize_cases_from_alerts(cursor, organization_id: int | None = None):
                 confidence,
                 status,
                 priority,
+                decision,
                 recommended_action,
                 created_at,
                 updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
             RETURNING id
         """, (
             f"CASE-{alert_id:04d}",
@@ -759,8 +760,9 @@ def materialize_cases_from_alerts(cursor, organization_id: int | None = None):
             int(risk_score or 0),
             risk_level or "LOW",
             float(confidence or 0),
-            "OPEN",
+            "UNDER_REVIEW" if action == "PND_OR_BLOCK" else "OPEN",
             priority_from_risk(risk_level),
+            action,
             action,
             timestamp,
         ))
@@ -783,7 +785,14 @@ def materialize_cases_from_alerts(cursor, organization_id: int | None = None):
         if action == "HOLD_FOR_REVIEW":
             audit_log(cursor, int(alert_organization_id), case_id, transaction_id, user_id, "TRANSACTION_HELD", None, "OPEN")
         elif action == "PND_OR_BLOCK":
-            audit_log(cursor, int(alert_organization_id), case_id, transaction_id, user_id, "TRANSACTION_BLOCKED", None, "OPEN")
+            timeline(
+                cursor,
+                case_id,
+                "AUTO_PND_APPLIED",
+                "Boujuron automatically applied PND/block controls because the transaction met critical multi-signal criteria.",
+                "System",
+            )
+            audit_log(cursor, int(alert_organization_id), case_id, transaction_id, user_id, "TRANSACTION_BLOCKED", None, "UNDER_REVIEW", "Automatic PND/block applied for critical high-confidence fraud pattern")
 
 
 def auto_close_high_risk_cases(cursor, organization_id: int | None = None):
@@ -1899,6 +1908,7 @@ def compare_rule_value(actual, operator: str, expected) -> bool:
 
 def evaluate_decision_rules(cursor, organization_id: int, event: dict, result: dict, device_data: dict) -> dict:
     ensure_decision_rule_tables(cursor)
+    original_action = str(result.get("action") or "").upper()
     cursor.execute("""
         SELECT id, name, conditions, action, score_adjustment
         FROM decision_rules
@@ -1923,10 +1933,18 @@ def evaluate_decision_rules(cursor, organization_id: int, event: dict, result: d
     strength = {"ALLOW": 0, "CHALLENGE": 1, "BLOCK": 2}
     model_action = {
         "ALLOW": "ALLOW",
+        "STEP_UP_VERIFY": "CHALLENGE",
+        "STEP_UP_VERIFICATION": "CHALLENGE",
         "VERIFY": "CHALLENGE",
+        "HOLD_FOR_REVIEW": "CHALLENGE",
         "BLOCK": "BLOCK",
+        "PND_OR_BLOCK": "BLOCK",
+        "AUTO_PND_BLOCK_TRANSACTION": "BLOCK",
+        "AUTO_PND_FREEZE_ACCOUNT_AND_ESCALATE": "BLOCK",
         "LOCK_ACCOUNT": "BLOCK",
     }.get(result["action"], "CHALLENGE")
+    if result["risk_level"] == "CRITICAL":
+        model_action = "BLOCK"
     final_action = model_action
     for rule in matched:
         if strength[rule["action"]] > strength[final_action]:
@@ -1958,12 +1976,25 @@ def evaluate_decision_rules(cursor, organization_id: int, event: dict, result: d
         "MEDIUM" if result["risk_score"] >= 40 else
         "LOW"
     )
-    result["action"] = final_action
-    result["recommendation"] = {
-        "ALLOW": "ALLOW",
-        "CHALLENGE": "STEP_UP_VERIFICATION",
-        "BLOCK": "AUTO_PND_FREEZE_ACCOUNT_AND_ESCALATE" if result["risk_level"] == "CRITICAL" else "AUTO_PND_BLOCK_TRANSACTION",
-    }[final_action]
+    if result["risk_level"] == "CRITICAL":
+        final_action = "BLOCK"
+        result["action"] = "PND_OR_BLOCK"
+        result["recommendation"] = "PND_OR_BLOCK"
+    elif final_action == "BLOCK":
+        result["action"] = "BLOCK"
+        result["recommendation"] = "AUTO_PND_BLOCK_TRANSACTION"
+    elif original_action == "HOLD_FOR_REVIEW" or result["risk_level"] == "HIGH":
+        result["action"] = "HOLD_FOR_REVIEW"
+        result["recommendation"] = "HOLD_FOR_REVIEW"
+    else:
+        result["action"] = {
+            "ALLOW": "ALLOW",
+            "CHALLENGE": "STEP_UP_VERIFY",
+        }[final_action]
+        result["recommendation"] = {
+            "ALLOW": "ALLOW",
+            "CHALLENGE": "STEP_UP_VERIFY",
+        }[final_action]
     result["confidence"] = min(99, max(float(result.get("confidence") or 55), result["risk_score"] + 4))
     return {
         "model_action": model_action,

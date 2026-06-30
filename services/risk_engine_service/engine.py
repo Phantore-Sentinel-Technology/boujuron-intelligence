@@ -3,6 +3,7 @@ from services.risk_engine_service.debit_rules import debit_signals
 from services.risk_engine_service.shared_rules import (
     action_for_decision,
     calculate_confidence,
+    level_from_evidence,
     level_from_score,
     shared_transaction_signals,
 )
@@ -43,7 +44,7 @@ def analyze_event(event, behavior=None):
         signals.extend(debit_signals(event, behavior))
 
     score = min(sum(item["points"] for item in signals), 100)
-    risk_level = level_from_score(score)
+    risk_level = level_from_evidence(score, signals)
     profile_ready = int(behavior.get("trusted_event_count") or 0) >= int(
         (behavior.get("settings") or {}).get("minimum_profile_events", 3)
     )

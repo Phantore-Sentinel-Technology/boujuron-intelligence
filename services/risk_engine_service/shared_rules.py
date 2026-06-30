@@ -206,8 +206,30 @@ def level_from_score(score):
     return "LOW"
 
 
+def level_from_evidence(score, signals):
+    if score < 40:
+        return "LOW"
+    if score < 70:
+        return "MEDIUM"
+    if score < 90:
+        return "HIGH"
+
+    strong_count = sum(
+        1 for item in signals
+        if item.get("strength") in {"STRONG", "CRITICAL"} or item["points"] >= 35
+    )
+    critical_count = sum(1 for item in signals if item.get("strength") == "CRITICAL")
+    categories = {item["category"] for item in signals}
+    has_extreme_pattern = (
+        (critical_count >= 1 and strong_count >= 2)
+        or strong_count >= 3
+        or (score >= 98 and len(categories) >= 2)
+    )
+    return "CRITICAL" if has_extreme_pattern else "HIGH"
+
+
 def action_for_decision(level, confidence):
-    if level == "CRITICAL" and confidence >= 85:
+    if level == "CRITICAL":
         return "PND_OR_BLOCK"
     if level == "HIGH":
         return "HOLD_FOR_REVIEW"

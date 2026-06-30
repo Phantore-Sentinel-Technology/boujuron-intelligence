@@ -41,12 +41,25 @@ export function Executive() {
         getFraudHeatMap()
       ]);
 
+      const overviewResult = results[0].status === "fulfilled" ? results[0].value : emptyOverview;
+      const trendResult = results[1].status === "fulfilled" ? results[1].value : [];
+      const riskResult = results[2].status === "fulfilled" ? results[2].value : [];
+      const analystResult = results[3].status === "fulfilled" ? results[3].value : [];
+      const heatResult = results[4].status === "fulfilled" ? results[4].value : [];
+      const derivedAlertCount = riskResult.reduce((total, item) => total + item.count, 0);
+      const derivedTrendCount = trendResult.reduce((total, item) => total + item.value, 0);
+      const executiveOverview = {
+        ...overviewResult,
+        total_events: Math.max(overviewResult.total_events, derivedAlertCount, derivedTrendCount),
+        fraud_alerts: Math.max(overviewResult.fraud_alerts, derivedAlertCount, derivedTrendCount)
+      };
+
       if (mounted) {
-        if (results[0].status === "fulfilled") setOverview(results[0].value);
-        if (results[1].status === "fulfilled") setTrends(results[1].value);
-        if (results[2].status === "fulfilled") setRiskDistribution(results[2].value);
-        if (results[3].status === "fulfilled") setAnalysts(results[3].value);
-        if (results[4].status === "fulfilled") setHeatMap(results[4].value);
+        setOverview(executiveOverview);
+        setTrends(trendResult);
+        setRiskDistribution(riskResult);
+        setAnalysts(analystResult);
+        setHeatMap(heatResult);
       }
 
       if (mounted) setLoading(false);

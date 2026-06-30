@@ -5,7 +5,7 @@ import type { CasePriority, CaseStatus, CaseSummary, RiskLevel } from "../types"
 import { getCases } from "../services/api";
 import { RiskBadge } from "../components/RiskBadge";
 
-const statuses: Array<"ALL" | CaseStatus> = ["ALL", "NEW", "ASSIGNED", "INVESTIGATING", "ESCALATED", "RESOLVED", "ARCHIVED"];
+const statuses: Array<"ALL" | CaseStatus> = ["ALL", "NEW", "OPEN", "UNDER_REVIEW", "ASSIGNED", "INVESTIGATING", "ESCALATED", "RESOLVED", "ARCHIVED"];
 const priorities: Array<"ALL" | CasePriority> = ["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW"];
 const risks: Array<"ALL" | RiskLevel> = ["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW"];
 
@@ -101,7 +101,11 @@ export function Cases() {
               ))}
             </tbody>
           </table>
-          {!loading && filtered.length === 0 && <div className="empty-state">No matching cases yet.</div>}
+          {!loading && filtered.length === 0 && (
+            <div className="empty-state">
+              No review cases yet. LOW decisions are allowed and monitored on the dashboard; HIGH and CRITICAL decisions open cases automatically.
+            </div>
+          )}
           {loading && <div className="empty-state">Loading case queue...</div>}
         </div>
       </section>
