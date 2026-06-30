@@ -653,6 +653,16 @@ def recommended_action_from_risk(risk_level: str | None) -> str:
     }.get((risk_level or "LOW").upper(), "REVIEW")
 
 
+def normalize_recommended_action(risk_level: str | None, action: str | None) -> str:
+    normalized_level = (risk_level or "LOW").upper()
+    normalized_action = (action or "").upper()
+    if normalized_level == "CRITICAL":
+        return "PND_OR_BLOCK"
+    if normalized_level == "HIGH" and normalized_action in {"", "ALLOW", "STEP_UP_VERIFY", "STEP_UP_VERIFICATION"}:
+        return "HOLD_FOR_REVIEW"
+    return normalized_action or recommended_action_from_risk(normalized_level)
+
+
 def should_create_case(risk_level: str | None, action: str | None) -> bool:
     normalized_level = (risk_level or "LOW").upper()
     normalized_action = (action or "").upper()
@@ -724,7 +734,7 @@ def materialize_cases_from_alerts(cursor, organization_id: int | None = None):
         cursor.execute("SELECT id FROM cases WHERE fraud_alert_id = %s", (alert_id,))
         if cursor.fetchone():
             continue
-        action = recommended_action or recommended_action_from_risk(risk_level)
+        action = normalize_recommended_action(risk_level, recommended_action)
         if not should_create_case(risk_level, action):
             continue
 
@@ -2971,7 +2981,7 @@ def get_fraud(limit: int = Query(50), current_user: AuthUserResponse = Depends(g
             timestamp=str(r[10]),
             risk_score=str(r[11]),
             risk_level=r[12],
-            recommended_action=r[13],
+            recommended_action=normalize_recommended_action(r[12], r[13]),
             confidence=float(r[14]) if r[14] is not None else None,
             signals_triggered=r[15],
             behavioral_match=r[16]
