@@ -14,10 +14,22 @@ export function CustomerProfile() {
   const [graph, setGraph] = useState<EvidenceGraph | null>(null);
 
   useEffect(() => {
+    let active = true;
     setLoading(true);
-    Promise.all([getUserRiskProfile(userId), getEvidenceGraph(userId)])
-      .then(([profileData, graphData]) => { setProfile(profileData); setGraph(graphData); })
-      .finally(() => setLoading(false));
+    setProfile(null);
+    setGraph(null);
+
+    Promise.allSettled([getUserRiskProfile(userId), getEvidenceGraph(userId)])
+      .then(([profileResult, graphResult]) => {
+        if (!active) return;
+        if (profileResult.status === "fulfilled") setProfile(profileResult.value);
+        if (graphResult.status === "fulfilled") setGraph(graphResult.value);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => { active = false; };
   }, [userId]);
 
   const trend = useMemo(() => {

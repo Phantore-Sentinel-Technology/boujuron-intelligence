@@ -9,6 +9,7 @@ import os
 import secrets
 import smtplib
 import time
+import threading
 import urllib.request
 from collections import Counter
 from datetime import datetime, timedelta
@@ -98,6 +99,8 @@ CASE_STATUSES = {
 CASE_PRIORITIES = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
 ANALYST_FEEDBACK = {"TRUE_FRAUD", "FALSE_POSITIVE", "NEEDS_REVIEW"}
 CASE_DECISIONS = {"ALLOW", "VERIFY", "BLOCK", "FREEZE", "ESCALATE", "STEP_UP_VERIFY", "HOLD_FOR_REVIEW", "PND_OR_BLOCK"}
+CASE_TABLES_READY = False
+CASE_TABLES_LOCK = threading.Lock()
 
 
 def get_cors_origins():
@@ -406,80 +409,86 @@ def ensure_fraud_alert_table(cursor):
 
 
 def ensure_case_tables(cursor):
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS cases (
-            id SERIAL PRIMARY KEY,
-            case_number TEXT UNIQUE,
-            fraud_alert_id INTEGER UNIQUE,
-            user_id TEXT NOT NULL,
-            reason TEXT DEFAULT '',
-            risk_score INTEGER DEFAULT 0,
-            risk_level TEXT DEFAULT 'LOW',
-            status TEXT DEFAULT 'NEW',
-            priority TEXT DEFAULT 'LOW',
-            assigned_to TEXT,
-            assigned_at TIMESTAMP,
-            analyst_feedback TEXT,
-            decision TEXT,
-            recommended_action TEXT,
-            potential_loss NUMERIC,
-            actual_loss NUMERIC,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            resolved_at TIMESTAMP
-        )
-    """)
-    cursor.execute("ALTER TABLE cases ADD COLUMN IF NOT EXISTS organization_id INTEGER")
-    for column_name, column_type in (
-        ("transaction_id", "TEXT"),
-        ("transaction_direction", "TEXT DEFAULT 'DEBIT'"),
-        ("confidence", "NUMERIC"),
-        ("analyst_note", "TEXT"),
-        ("reversed_at", "TIMESTAMP"),
-    ):
-        cursor.execute(f"""
-            ALTER TABLE cases
-            ADD COLUMN IF NOT EXISTS {column_name} {column_type}
+    global CASE_TABLES_READY
+    if CASE_TABLES_READY:
+        return
+    with CASE_TABLES_LOCK:
+        if CASE_TABLES_READY:
+            return
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS cases (
+                id SERIAL PRIMARY KEY,
+                case_number TEXT UNIQUE,
+                fraud_alert_id INTEGER UNIQUE,
+                user_id TEXT NOT NULL,
+                reason TEXT DEFAULT '',
+                risk_score INTEGER DEFAULT 0,
+                risk_level TEXT DEFAULT 'LOW',
+                status TEXT DEFAULT 'NEW',
+                priority TEXT DEFAULT 'LOW',
+                assigned_to TEXT,
+                assigned_at TIMESTAMP,
+                analyst_feedback TEXT,
+                decision TEXT,
+                recommended_action TEXT,
+                potential_loss NUMERIC,
+                actual_loss NUMERIC,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                resolved_at TIMESTAMP
+            )
         """)
-    cursor.execute("""
-        UPDATE cases
-        SET organization_id = (SELECT id FROM organizations WHERE slug = 'boujuron')
-        WHERE organization_id IS NULL
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS case_notes (
-            id SERIAL PRIMARY KEY,
-            case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
-            author TEXT NOT NULL,
-            note TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS case_timeline (
-            id SERIAL PRIMARY KEY,
-            case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
-            event_type TEXT NOT NULL,
-            description TEXT NOT NULL,
-            actor TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS fraud_audit_logs (
-            id SERIAL PRIMARY KEY,
-            organization_id INTEGER,
-            case_id INTEGER,
-            transaction_id TEXT,
-            user_id TEXT,
-            action_taken TEXT NOT NULL,
-            previous_status TEXT,
-            new_status TEXT,
-            analyst_note TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
+        cursor.execute("ALTER TABLE cases ADD COLUMN IF NOT EXISTS organization_id INTEGER")
+        for column_name, column_type in (
+            ("transaction_id", "TEXT"),
+            ("transaction_direction", "TEXT DEFAULT 'DEBIT'"),
+            ("confidence", "NUMERIC"),
+            ("analyst_note", "TEXT"),
+            ("reversed_at", "TIMESTAMP"),
+        ):
+            cursor.execute(f"""
+                ALTER TABLE cases
+                ADD COLUMN IF NOT EXISTS {column_name} {column_type}
+            """)
+        cursor.execute("""
+            UPDATE cases
+            SET organization_id = (SELECT id FROM organizations WHERE slug = 'boujuron')
+            WHERE organization_id IS NULL
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS case_notes (
+                id SERIAL PRIMARY KEY,
+                case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+                author TEXT NOT NULL,
+                note TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS case_timeline (
+                id SERIAL PRIMARY KEY,
+                case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+                event_type TEXT NOT NULL,
+                description TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS fraud_audit_logs (
+                id SERIAL PRIMARY KEY,
+                organization_id INTEGER,
+                case_id INTEGER,
+                transaction_id TEXT,
+                user_id TEXT,
+                action_taken TEXT NOT NULL,
+                previous_status TEXT,
+                new_status TEXT,
+                analyst_note TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        CASE_TABLES_READY = True
 
 def ensure_decision_rule_tables(cursor):
     cursor.execute("""
@@ -3178,9 +3187,9 @@ def get_evidence_graph(user_id: str, current_user: AuthUserResponse = Depends(ge
     prepare_analytics_tables(cursor)
     organization_id = current_user.organization_id or default_organization_id(cursor)
     cursor.execute("""
-        SELECT COALESCE(NULLIF(device_id,''), device_type), ip, transaction_id, risk_level
+        SELECT COALESCE(NULLIF(e.device_id,''), e.device_type), e.ip, e.transaction_id, COALESCE(f.risk_level, 'LOW')
         FROM events e
-        LEFT JOIN fraud_alerts f ON f.organization_id=e.organization_id AND f.user_id=e.user_id
+        LEFT JOIN fraud_alerts f ON f.organization_id=e.organization_id AND f.user_id=e.user_id AND f.transaction_id=e.transaction_id
         WHERE e.organization_id=%s AND e.user_id=%s
         ORDER BY e.timestamp DESC LIMIT 50
     """, (organization_id, user_id))
