@@ -75,6 +75,7 @@ def shared_transaction_signals(event, behavior):
     ip = str(event.get("ip") or "").strip()
     network = str(event.get("network") or "").upper().strip()
     event_type = str(event.get("event_type") or "transaction").lower().strip()
+    direction = str(event.get("transaction_direction") or "").upper().strip()
     timestamp = parse_timestamp(event.get("timestamp"))
     device_intelligence = behavior.get("device_intelligence") or {}
     takeover_context = behavior.get("account_takeover") or {}
@@ -161,7 +162,20 @@ def shared_transaction_signals(event, behavior):
     login_limit = int(risk_settings.get("login_velocity_limit", 8))
     velocity_points = int(risk_settings.get("velocity_points", 30))
     velocity_minutes = int(risk_settings.get("velocity_window_minutes", 10))
-    if event_type in {"transaction", "large_transfer", "transfer", "payment", "wallet_transfer", "agent_cashout", "pos_withdrawal", "debit"} and transaction_velocity >= transaction_limit:
+    current_transaction_count = transaction_velocity + 1
+    explicit_outflow_count = max(
+        event_int(event, "repetitive_outflow_count"),
+        event_int(event, "outflow_count"),
+        event_int(event, "debit_count"),
+    )
+    if explicit_outflow_count:
+        current_transaction_count = max(current_transaction_count, explicit_outflow_count)
+    outflow_events = {"transaction", "large_transfer", "transfer", "payment", "wallet_transfer", "agent_cashout", "pos_withdrawal", "debit", "withdrawal", "outflow"}
+    is_outflow = direction == "DEBIT" or event_type in outflow_events
+    repetitive_outflow_limit = int(risk_settings.get("repetitive_outflow_limit", 5))
+    if is_outflow and current_transaction_count >= repetitive_outflow_limit:
+        signals.append(signal("VELOCITY", "Repetitive outflow pattern", max(velocity_points, 45), f"{current_transaction_count} outgoing transactions within {velocity_minutes} minutes; account should be held before more funds leave", "STRONG"))
+    elif event_type in outflow_events and transaction_velocity >= transaction_limit:
         signals.append(signal("VELOCITY", "Transaction velocity spike", velocity_points, f"{transaction_velocity + 1} transactions within {velocity_minutes} minutes", "STRONG"))
     if event_type in {"login", "login_success", "login_failure", "multiple_failed_logins"} and login_velocity >= login_limit:
         signals.append(signal("ACCOUNT_TAKEOVER", "Login velocity spike", velocity_points, f"{login_velocity + 1} login events within {velocity_minutes} minutes"))
@@ -207,8 +221,10 @@ def level_from_score(score):
 
 
 def level_from_evidence(score, signals):
-    if score < 40:
+    if score <= 0 or not signals:
         return "LOW"
+    if score < 40:
+        return "MEDIUM"
     if score < 70:
         return "MEDIUM"
     if score < 90:
@@ -224,6 +240,7 @@ def level_from_evidence(score, signals):
         (critical_count >= 1 and strong_count >= 2)
         or strong_count >= 3
         or (score >= 98 and len(categories) >= 2)
+        or (score >= 98 and len(signals) >= 2)
     )
     return "CRITICAL" if has_extreme_pattern else "HIGH"
 

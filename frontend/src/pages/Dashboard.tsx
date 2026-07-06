@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Gauge, RotateCcw, ShieldAlert, ShieldCheck, UserRoundSearch, XCircle } from "lucide-react";
+import { Activity, AlertTriangle, Gauge, RotateCcw, ShieldAlert, UserRoundSearch, XCircle } from "lucide-react";
 import { useMemo } from "react";
 import type { AlertStats, FraudAlert } from "../types";
 import { StatCard } from "../components/StatCard";
@@ -20,11 +20,11 @@ export function Dashboard({ alerts, topAlerts, stats, loading, reloadAlerts }: D
   return (
     <div className="page-grid">
       <section className="stats-grid">
-        <StatCard label="Total alerts" value={stats.total} hint="latest events" icon={Activity} />
-        <StatCard label="Critical" value={stats.critical} hint="freeze + escalate" icon={ShieldAlert} tone="danger" />
-        <StatCard label="High risk" value={stats.high} hint="block and review" icon={AlertTriangle} tone="warn" />
-        <StatCard label="Avg score" value={stats.avgScore} hint="risk index" icon={Gauge} />
-        <StatCard label="Low risk" value={stats.low} hint="allowed traffic" icon={ShieldCheck} tone="good" />
+        <StatCard label="Suspicious queue" value={stats.total} hint="medium and above" icon={Activity} />
+        <StatCard label="Critical" value={stats.critical} hint="account PND" icon={ShieldAlert} tone="danger" />
+        <StatCard label="High risk" value={stats.high} hint="hold for review" icon={AlertTriangle} tone="warn" />
+        <StatCard label="Medium" value={stats.medium} hint="step-up verification" icon={Gauge} tone="warn" />
+        <StatCard label="Avg score" value={stats.avgScore} hint="suspicious risk index" icon={Gauge} />
       </section>
 
       <section className="ops-grid">

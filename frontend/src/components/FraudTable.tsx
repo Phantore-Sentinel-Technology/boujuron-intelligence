@@ -6,7 +6,7 @@ import { RiskBadge } from "./RiskBadge";
 import { AlertDrawer } from "./AlertDrawer";
 import { closeCaseWorkflow, confirmFraudCase, markFalsePositiveCase, reverseCaseRestriction, reviewCase } from "../services/api";
 
-const risks: Array<"ALL" | RiskLevel> = ["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW"];
+const risks: Array<"ALL" | RiskLevel> = ["ALL", "CRITICAL", "HIGH", "MEDIUM"];
 
 interface FraudTableProps {
   alerts: FraudAlert[];
@@ -219,8 +219,8 @@ function AlertTags({ alert }: { alert: FraudAlert }) {
   const tags = [];
   const reasons = countReasons(alert.reason);
   const action = (alert.recommended_action || "").toUpperCase();
-  if (alert.risk_level === "CRITICAL" || action.includes("FREEZE")) tags.push("AUTO FREEZE");
-  if (alert.risk_level === "HIGH" || action.includes("PND") || action.includes("BLOCK")) tags.push("AUTO PND");
+  if (alert.risk_level === "CRITICAL" || action.includes("PND") || action.includes("BLOCK")) tags.push("ACCOUNT PND");
+  if (alert.risk_level === "HIGH" || action.includes("HOLD")) tags.push("ACCOUNT HOLD");
   if (reasons >= 3) tags.push("MULTI-SIGNAL");
   if (/failed login|credential|bot|automation|accounts from/i.test(alert.reason)) tags.push("BOT/ATO");
   if (/withdrawal|cashout|outflow|transfer|beneficiary|mule/i.test(alert.reason)) tags.push("MONEY MOVEMENT");
@@ -229,7 +229,11 @@ function AlertTags({ alert }: { alert: FraudAlert }) {
 }
 
 function formatAction(action?: string | null) {
-  return (action || "REVIEW").replaceAll("_", " ");
+  const normalized = (action || "REVIEW").toUpperCase();
+  if (normalized.includes("PND") || normalized.includes("BLOCK")) return "ACCOUNT PND / BLOCK";
+  if (normalized.includes("HOLD")) return "HOLD ACCOUNT FOR REVIEW";
+  if (normalized.includes("STEP_UP")) return "STEP-UP VERIFICATION";
+  return normalized.replaceAll("_", " ");
 }
 
 function formatConfidence(confidence?: number | null) {
@@ -249,7 +253,6 @@ function canReverse(alert: FraudAlert) {
 }
 
 function monitoringCopy(alert: FraudAlert) {
-  if (alert.risk_level === "LOW") return "Allowed decision. No analyst closure required.";
   if (alert.risk_level === "MEDIUM") return "Step-up verification tracked without opening a case.";
   return "No case record exists for this decision.";
 }

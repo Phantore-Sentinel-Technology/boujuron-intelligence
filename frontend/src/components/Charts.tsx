@@ -2,14 +2,13 @@ import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContaine
 import type { FraudAlert } from "../types";
 
 const colors = {
-  LOW: "#22c55e",
   MEDIUM: "#f59e0b",
   HIGH: "#f97316",
   CRITICAL: "#dc2626"
 };
 
 export function RiskDonut({ alerts }: { alerts: FraudAlert[] }) {
-  const data = (["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const).map((level) => ({
+  const data = (["MEDIUM", "HIGH", "CRITICAL"] as const).map((level) => ({
     name: level,
     value: alerts.filter((alert) => alert.risk_level === level).length
   }));
@@ -19,7 +18,7 @@ export function RiskDonut({ alerts }: { alerts: FraudAlert[] }) {
       <div className="section-header compact">
         <div>
           <p className="eyebrow">Distribution</p>
-          <h2>Risk Mix</h2>
+          <h2>Suspicious Risk Mix</h2>
         </div>
       </div>
       <ResponsiveContainer width="100%" height={260}>

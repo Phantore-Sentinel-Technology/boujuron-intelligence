@@ -18,7 +18,7 @@ export function useFraudAlerts() {
     setLoading(true);
     return getFraudAlerts()
       .then((data) => {
-        setAlerts(data);
+        setAlerts(data.filter((alert) => alert.risk_level !== "LOW"));
         setConnection((current) => (current === "live" ? current : "polling"));
       })
       .catch(() => setConnection("offline"))
@@ -31,7 +31,7 @@ export function useFraudAlerts() {
     const timer = window.setInterval(() => {
       getFraudAlerts()
         .then((data) => {
-          setAlerts(data);
+          setAlerts(data.filter((alert) => alert.risk_level !== "LOW"));
           setConnection((current) => (current === "live" ? current : "polling"));
         })
         .catch(() => setConnection("offline"));
@@ -50,6 +50,7 @@ export function useFraudAlerts() {
       socket.onopen = () => setConnection("live");
       socket.onmessage = (event) => {
         const alert = JSON.parse(event.data) as FraudAlert;
+        if (alert.risk_level === "LOW") return;
         setAlerts((current) => [alert, ...current].slice(0, 100));
       };
       socket.onerror = () => setConnection("polling");

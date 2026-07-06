@@ -1,11 +1,16 @@
 import type { FraudAlert, ScoreBreakdownItem } from "../types";
 
 export function recommendedAction(level: FraudAlert["risk_level"], fallback?: string | null) {
-  if (fallback) return fallback.replaceAll("_", " ");
+  if (fallback) {
+    const normalized = fallback.toUpperCase();
+    if (normalized.includes("PND") || normalized.includes("BLOCK")) return "Account PND / Block";
+    if (normalized.includes("HOLD")) return "Hold Account for Review";
+    return fallback.replaceAll("_", " ");
+  }
   if (level === "LOW") return "Allow";
   if (level === "MEDIUM") return "Step-Up Verification";
-  if (level === "HIGH") return "Block + Review";
-  return "Freeze Account + Escalate";
+  if (level === "HIGH") return "Hold Account for Review";
+  return "Account PND / Block";
 }
 
 export function explainAlert(alert: FraudAlert): ScoreBreakdownItem[] {

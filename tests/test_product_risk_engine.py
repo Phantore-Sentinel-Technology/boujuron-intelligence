@@ -39,13 +39,13 @@ def test_behavioral_amount_spike_adds_explainable_signal():
     )
 
     labels = [signal["label"] for signal in result["signals"]]
-    assert "Transaction amount spike" in labels
+    assert "Debit amount spike" in labels
     assert result["risk_level"] == "MEDIUM"
-    assert result["action"] == "VERIFY"
-    assert result["recommendation"] == "STEP_UP_VERIFICATION"
+    assert result["action"] == "STEP_UP_VERIFY"
+    assert result["recommendation"] == "STEP_UP_VERIFY"
 
 
-def test_rooted_new_device_and_vpn_is_critical():
+def test_rooted_new_device_and_vpn_is_high_hold_for_review():
     result = analyze_event(
         {
             "user_id": "acct_device",
@@ -66,9 +66,9 @@ def test_rooted_new_device_and_vpn_is_critical():
     )
 
     assert result["risk_score"] >= 70
-    assert result["risk_level"] == "CRITICAL"
-    assert result["action"] == "LOCK_ACCOUNT"
-    assert result["recommendation"] == "AUTO_PND_FREEZE_ACCOUNT_AND_ESCALATE"
+    assert result["risk_level"] == "HIGH"
+    assert result["action"] == "HOLD_FOR_REVIEW"
+    assert result["recommendation"] == "HOLD_FOR_REVIEW"
 
 
 def test_account_takeover_signals_lock_account():
@@ -88,8 +88,8 @@ def test_account_takeover_signals_lock_account():
 
     assert result["risk_score"] == 100
     assert result["risk_level"] == "CRITICAL"
-    assert result["action"] == "LOCK_ACCOUNT"
-    assert result["recommendation"] == "AUTO_PND_FREEZE_ACCOUNT_AND_ESCALATE"
+    assert result["action"] == "PND_OR_BLOCK"
+    assert result["recommendation"] == "PND_OR_BLOCK"
 
 
 def test_organization_policy_controls_behavioral_signal_points():
@@ -144,9 +144,9 @@ def test_transaction_velocity_window_adds_risk():
         },
     )
 
-    assert "Transaction velocity spike" in result["reasons"]
+    assert "Repetitive outflow pattern" in result["reasons"]
     assert result["risk_level"] == "MEDIUM"
-    assert result["action"] == "VERIFY"
+    assert result["action"] == "STEP_UP_VERIFY"
 
 
 def test_failed_device_attestation_is_high_risk():
@@ -187,7 +187,7 @@ def test_blocked_fingerprint_is_locked_immediately():
 
     assert result["risk_score"] == 80
     assert result["risk_level"] == "HIGH"
-    assert result["action"] == "BLOCK"
+    assert result["action"] == "HOLD_FOR_REVIEW"
 
 
 def test_correlated_takeover_signals_produce_lock_recommendation():
@@ -223,5 +223,33 @@ def test_correlated_takeover_signals_produce_lock_recommendation():
 
     assert result["account_takeover"]["detected"] is True
     assert result["account_takeover"]["score"] == 100
-    assert result["account_takeover"]["recommendation"] == "LOCK_ACCOUNT"
-    assert result["action"] == "LOCK_ACCOUNT"
+    assert result["account_takeover"]["recommendation"] == "PND_OR_BLOCK"
+    assert result["action"] == "PND_OR_BLOCK"
+
+
+def test_explicit_repetitive_outflow_count_triggers_at_five():
+    result = analyze_event(
+        {
+            "user_id": "acct_repetitive",
+            "amount": 20_000,
+            "transaction_direction": "DEBIT",
+            "event_type": "wallet_transfer",
+            "repetitive_outflow_count": 5,
+            "device": "iphone",
+            "ip": "102.88.45.30",
+            "location": "nigeria",
+            "timestamp": "2026-06-19T12:00:00",
+        },
+        {
+            "trusted_event_count": 6,
+            "settings": {
+                "minimum_profile_events": 3,
+                "velocity_window_minutes": 10,
+                "velocity_points": 40,
+            },
+        },
+    )
+
+    assert "Repetitive outflow pattern" in result["reasons"]
+    assert result["risk_level"] == "MEDIUM"
+    assert result["action"] == "STEP_UP_VERIFY"

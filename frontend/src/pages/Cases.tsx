@@ -103,7 +103,7 @@ export function Cases() {
           </table>
           {!loading && filtered.length === 0 && (
             <div className="empty-state">
-              No review cases yet. LOW decisions are allowed and monitored on the dashboard; HIGH and CRITICAL decisions open cases automatically.
+              No review cases yet. LOW decisions are recorded in History only; MEDIUM appears on the dashboard for verification, while HIGH and CRITICAL decisions open cases automatically.
             </div>
           )}
           {loading && <div className="empty-state">Loading case queue...</div>}

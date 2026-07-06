@@ -963,6 +963,8 @@ def authenticate_risk_client(
 
 
 async def broadcast_alert(alert: dict, organization_id: int):
+    if (alert.get("risk_level") or "LOW").upper() == "LOW":
+        return
     disconnected = []
     for connection in clients:
         if connection["organization_id"] != organization_id:
@@ -2616,6 +2618,9 @@ async def score_risk(
         "registration_count": payload.registration_count,
         "automation_score": payload.automation_score,
         "repeated_failed_payments": payload.repeated_failed_payments,
+        "repetitive_outflow_count": payload.repetitive_outflow_count,
+        "outflow_count": payload.outflow_count,
+        "debit_count": payload.debit_count,
         "rapid_credit_count": payload.rapid_credit_count,
         "different_sender_count": payload.different_sender_count,
         "debits_after_credit_count": payload.debits_after_credit_count,
@@ -2968,6 +2973,7 @@ def get_fraud(limit: int = Query(50), current_user: AuthUserResponse = Depends(g
             LIMIT 1
         ) latest_note ON TRUE
         WHERE f.organization_id = %s
+          AND COALESCE(f.risk_level, 'LOW') <> 'LOW'
         ORDER BY f.id DESC LIMIT %s
     """, (organization_id, limit))
 

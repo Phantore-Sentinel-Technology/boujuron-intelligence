@@ -250,6 +250,9 @@ class RiskScoreRequest(BaseModel):
     registration_count: int = Field(default=0, ge=0)
     automation_score: int = Field(default=0, ge=0, le=100)
     repeated_failed_payments: bool = False
+    repetitive_outflow_count: int = Field(default=0, ge=0)
+    outflow_count: int = Field(default=0, ge=0)
+    debit_count: int = Field(default=0, ge=0)
     rapid_credit_count: int = Field(default=0, ge=0)
     different_sender_count: int = Field(default=0, ge=0)
     debits_after_credit_count: int = Field(default=0, ge=0)
