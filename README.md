@@ -1,159 +1,94 @@
 # Boujuron Intelligence
 
-**Boujuron Intelligence** is an Africa-focused **fraud intelligence API and banking-grade fraud operations platform** for fintechs, digital wallets, payment companies, marketplaces, SaaS products, and financial institutions.
+**Boujuron Intelligence** is an Africa-focused **fraud intelligence API, real-time risk decision engine, and banking fraud operations platform** built for fintechs, digital wallets, payment companies, marketplaces, SaaS platforms, and financial institutions.
 
-Boujuron helps organizations score risky activity in real time, detect abnormal customer behavior, apply balanced fraud decisions, protect funds through automatic PND/block controls for critical threats, and give analysts a clear investigation workflow for review, reversal, closure, and audit.
+Boujuron helps organizations detect suspicious activity early, score debit and credit transactions in real time, apply balanced fraud decisions, trigger account-level protection for critical threats, and give analysts a complete workflow for investigation, reversal, closure, and audit.
 
-The platform has evolved from a fraud dashboard into a real-time fraud decisioning and operations system.
+This project is being submitted for a hackathon as a working product prototype and technical foundation for a larger vision: **Africa-native fraud intelligence infrastructure for modern financial platforms**.
+
+---
+
+## Hackathon Summary
+
+Fraud teams do not only need another dashboard. They need a system that can answer:
+
+> Should this customer activity be allowed, challenged, held for review, or blocked immediately?
+
+Boujuron addresses that by combining:
+
+- A real-time **Fraud Intelligence API**
+- Banking-focused **debit and credit risk rules**
+- **Behavioral intelligence** and user risk profiles
+- **Device fingerprinting** and account takeover indicators
+- **Bot attack and credential stuffing detection**
+- **Automatic PND/block logic** for critical high-confidence cases
+- A fraud operations dashboard for analysts and managers
+- Case review, false-positive handling, reversal, closure, and audit logs
+- Executive analytics, exports, and reporting
+- A foundation for multi-tenant customer isolation and consortium intelligence
+
+Boujuron is designed to protect customers and institutions while reducing unnecessary friction for legitimate activity.
+
+---
+
+## The Problem
+
+African fintechs, wallets, and payment platforms face fast-moving fraud patterns such as:
+
+- Account takeovers
+- SIM swap and new-device fraud
+- Credential stuffing and bot attacks
+- Suspicious inflows
+- Repetitive outflows
+- Mule account movement
+- Dormant accounts suddenly receiving large credits
+- Large transfers after password reset or SIM change
+- VPN, TOR, proxy, emulator, and rooted-device usage
+- Analyst overload during mass-fraud events
+- Slow manual response when funds need to be protected immediately
+
+Traditional dashboards can show alerts, but they often leave the hardest question unanswered: **what should the system do right now?**
+
+Boujuron is built around decisioning, not just visibility.
 
 ---
 
 ## Product Positioning
 
-Boujuron is designed to answer one operational question:
+Boujuron is a **fraud decisioning and operations layer** that can sit inside a financial platform's login, wallet, debit, credit, transfer, beneficiary, and account-management workflows.
 
-> Should this activity be allowed, challenged, held for review, or blocked immediately?
+When a client platform sends an event, Boujuron returns:
 
-The platform receives login, wallet, transaction, device, and behavioral events, then returns a structured fraud decision containing:
-
-- Risk score
-- Risk level
-- Confidence
-- Recommended action
+- `risk_score`
+- `risk_level`
+- `confidence`
+- `recommended_action`
 - Human-readable reasons
 - Triggered signals
 - Device intelligence
 - Account takeover indicators
-- Case and audit records where required
+- Case/audit metadata where required
 
-Boujuron is built for teams that need to reduce fraud losses without creating unnecessary friction for legitimate customers.
+Boujuron's default decision model:
 
----
+| Risk Level | Meaning | Default Action | Operational Handling |
+| ---------- | ------- | -------------- | -------------------- |
+| LOW | Normal or trusted activity | `ALLOW` | Stored in history, not shown in the analyst dashboard queue |
+| MEDIUM | Suspicious but not severe | `STEP_UP_VERIFY` | Customer verification or analyst attention |
+| HIGH | Strong suspicious indicators | `HOLD_FOR_REVIEW` | Case opened for review |
+| CRITICAL | Extreme multi-signal fraud confidence | `PND_OR_BLOCK` | Account-level PND/block protection is applied, then analyst can confirm or reverse |
 
-## Current Version
+Important principle:
 
-Boujuron V2 is focused on **banking-grade fraud protection** and supports:
-
-- Debit and credit transaction monitoring
-- Real-time risk scoring API
-- Balanced decisioning model
-- Auto-PND/block for critical, high-confidence fraud
-- Analyst review for medium and high-risk cases
-- Reversal workflow for false positives
-- Audit trail for major fraud decisions
-- User risk profiles
-- Device fingerprinting
-- Account takeover detection
-- Bot attack detection
-- Behavioral intelligence
-- Fraud playbooks
-- Investigation timeline
-- Case management
-- Executive analytics
-- CSV/PDF reporting
-- Fraud heat map
-- Invite-only authentication
-- API keys and customer portal foundation
-- Multi-tenant organization isolation foundation
-- Consortium intelligence foundation
+> Boujuron should not be a harsh blocking system. It should protect customers and financial institutions while reducing unnecessary customer friction. Only extreme, high-confidence fraud should trigger account-level PND/block.
 
 ---
 
-## Why Boujuron Exists
+## Current Feature Set
 
-Fraud teams in fintech and banking environments face pressure from:
+### Real-Time Fraud Intelligence API
 
-- Account takeovers
-- SIM swap indicators
-- New-device fraud
-- Credential stuffing
-- Bot-driven login and registration abuse
-- Suspicious inflows
-- Repetitive outflows
-- Mule account movement
-- Dormant accounts suddenly receiving large funds
-- Large transfers after security changes
-- VPN, proxy, TOR, emulator, and rooted-device usage
-- Manual review backlogs
-- Slow response during mass-fraud incidents
-
-Traditional dashboards only show alerts. Boujuron is designed to help institutions **detect, decide, act, review, and audit** from one platform.
-
----
-
-## Decision Model
-
-Boujuron separates **risk score** from **confidence**.
-
-- **Risk score** measures how severe the detected behavior is.
-- **Confidence** measures how certain the platform is that the decision is correct.
-
-This distinction is important because not every unusual transaction should be blocked.
-
-| Risk Level | Meaning | Default Action |
-| ---------- | ------- | -------------- |
-| LOW | Normal or trusted activity | `ALLOW` |
-| MEDIUM | Some suspicious indicators | `STEP_UP_VERIFY` |
-| HIGH | Strong suspicious indicators | `HOLD_FOR_REVIEW` |
-| CRITICAL | Severe multi-signal fraud confidence | `PND_OR_BLOCK` |
-
-Boujuron follows a balanced fraud principle:
-
-> Only highly confident fraud should trigger hard blocking or PND. Moderate risk should go through verification or analyst review. Low risk should be allowed.
-
----
-
-## Debit and Credit Fraud Rules
-
-Boujuron treats money leaving and money entering an account differently.
-
-### Debit Monitoring
-
-Debit rules focus on outgoing fraud risk:
-
-- Unusual transaction amount
-- New or suspicious device
-- Blacklisted IP
-- VPN, TOR, proxy, emulator, or rooted device
-- Unusual login or transaction time
-- Multiple failed login attempts
-- Recent password reset
-- SIM change before transaction
-- New beneficiary before large transfer
-- High transaction velocity
-- Repetitive outflows
-- Sudden behavior change from customer profile
-
-### Credit Monitoring
-
-Credit rules focus on incoming-fund risk:
-
-- Unusual incoming amount
-- Multiple rapid credits from different sources
-- Credits followed quickly by suspicious debits
-- Suspicious sender or channel pattern
-- Mule-account behavior
-- Dormant account suddenly receiving large credits
-- Unusual credit frequency
-- High-risk inflow channels
-- Reversal or chargeback risk indicators
-
-Rule modules are separated for readability and growth:
-
-```text
-services/risk_engine_service/debit_rules.py
-services/risk_engine_service/credit_rules.py
-services/risk_engine_service/shared_rules.py
-services/risk_engine_service/engine.py
-```
-
----
-
-## Real-Time Fraud Intelligence API
-
-Boujuron can be integrated directly into a fintech's login, wallet, transaction, or payment workflow.
-
-### Endpoint
+Boujuron exposes a risk-scoring API that client systems can call before allowing sensitive activity.
 
 ```http
 POST /risk-score
@@ -162,7 +97,7 @@ Content-Type: application/json
 Idempotency-Key: transaction-unique-key
 ```
 
-Client API-key support is also available for customer integrations:
+Client API-key integrations are also supported:
 
 ```http
 POST /risk-score
@@ -171,126 +106,94 @@ Idempotency-Key: transaction-unique-key
 Content-Type: application/json
 ```
 
-### Example Debit Request
-
-```json
-{
-  "transaction_id": "debit_001",
-  "user_id": "customer_101",
-  "transaction_direction": "DEBIT",
-  "amount": 500000,
-  "event_type": "wallet_transfer",
-  "device_type": "android",
-  "device_id": "device-a19",
-  "ip": "102.88.45.21",
-  "location": "lagos, nigeria",
-  "network": "MOBILE",
-  "failed_login_count": 0,
-  "password_changed_recently": false,
-  "sim_swap_detected": false,
-  "new_beneficiary_added": false
-}
-```
-
-### Example Credit Request
-
-```json
-{
-  "transaction_id": "credit_001",
-  "user_id": "customer_301",
-  "transaction_direction": "CREDIT",
-  "amount": 2500000,
-  "event_type": "credit",
-  "device_type": "unknown device",
-  "device_id": "device-credit-301",
-  "ip": "102.88.45.31",
-  "location": "port harcourt, nigeria",
-  "network": "MOBILE",
-  "account_age_days": 2,
-  "dormant_account": true,
-  "rapid_credit_count": 4
-}
-```
-
-### Example Response
+Example response:
 
 ```json
 {
   "decision_id": 42,
-  "user_id": "customer_301",
-  "transaction_id": "credit_001",
-  "transaction_direction": "CREDIT",
-  "risk_score": 100,
+  "transaction_id": "debit_001",
+  "user_id": "customer_101",
+  "transaction_direction": "DEBIT",
+  "risk_score": 96,
   "risk_level": "CRITICAL",
-  "action": "PND_OR_BLOCK",
-  "recommendation": "PND_OR_BLOCK",
   "confidence": 99,
+  "recommended_action": "PND_OR_BLOCK",
   "reasons": [
-    "Very large incoming credit",
-    "Dormant account large credit",
-    "Suspicious device: unknown device"
+    "New device after password reset",
+    "SIM swap indicator",
+    "Large transfer attempt",
+    "Blacklisted IP",
+    "VPN usage detected"
   ],
   "signals": [
     {
-      "category": "CREDIT",
-      "label": "Very large incoming credit",
-      "points": 35,
-      "evidence": "Incoming credit exceeded configured high-value threshold"
+      "category": "ACCOUNT_TAKEOVER",
+      "label": "New device after password reset",
+      "points": 30
     }
   ],
   "behavioral_match": false,
-  "device_intelligence": {
-    "status": "NEW",
-    "trust_score": 25,
-    "is_new_device": true
-  },
-  "account_takeover": {
-    "detected": false,
-    "score": 0,
-    "level": "LOW",
-    "indicators": []
-  },
-  "created_at": "2026-06-30 13:43:12"
+  "created_at": "2026-07-18T10:30:00Z"
 }
 ```
 
----
+### Debit and Credit Transaction Monitoring
 
-## Automatic PND and Analyst Review
+Boujuron treats money leaving an account and money entering an account differently.
 
-Boujuron does not wait for analysts when a transaction is critical and highly confident.
+**Debit monitoring** checks for:
+
+- Unusual outgoing amount
+- New or suspicious device
+- Blacklisted IP
+- VPN, TOR, proxy, emulator, or rooted device
+- Unusual login or transaction time
+- Failed login bursts
+- Recent password reset
+- SIM change before transaction
+- New beneficiary before large transfer
+- High transaction velocity
+- Repetitive outflows
+- Sudden change from customer profile
+
+**Credit monitoring** checks for:
+
+- Unusual incoming amount
+- Multiple rapid credits from different sources
+- Credits followed quickly by suspicious debits
+- Suspicious sender/channel pattern
+- Mule-account behavior
+- Dormant account suddenly receiving large credits
+- Unusual credit frequency
+- High-risk inflow channels
+- Reversal or chargeback risk indicators
+
+Rule modules are organized for maintainability:
+
+```text
+services/risk_engine_service/debit_rules.py
+services/risk_engine_service/credit_rules.py
+services/risk_engine_service/shared_rules.py
+services/risk_engine_service/engine.py
+```
+
+### Account-Level PND / Block Logic
+
+Boujuron's latest workflow focuses on account protection, not just transaction labels.
 
 For `CRITICAL` decisions:
 
-- Recommended action becomes `PND_OR_BLOCK`
-- Transaction is treated as temporarily blocked or restricted
+- Boujuron applies account-level PND/block recommendation
+- The risky transaction is treated as restricted
 - A fraud case is opened automatically
-- Audit log records `TRANSACTION_BLOCKED`
-- Timeline records `AUTO_PND_APPLIED`
-- Analyst can later confirm fraud or reverse the restriction
+- Audit logs record the system action
+- The analyst can later confirm fraud, mark false positive, reverse, or close
 
-For `HIGH` decisions:
+This follows the operational reality that fraud can move faster than analyst queues.
 
-- Recommended action becomes `HOLD_FOR_REVIEW`
-- Case is opened for analyst review
-- Analyst decides whether to confirm fraud, mark false positive, reverse, or close
+### Analyst Review and Reversal Workflow
 
-For `MEDIUM` decisions:
-
-- Recommended action becomes `STEP_UP_VERIFY`
-- Customer may be challenged with OTP, PIN, MFA, or additional verification
-
-For `LOW` decisions:
-
-- Activity is allowed and monitored
-
----
-
-## Case Management and Reversal Workflow
-
-Boujuron creates investigation cases when activity requires review or restriction.
-
-Case statuses include:
+Cases can move through review states such as:
 
 - `OPEN`
 - `UNDER_REVIEW`
@@ -311,26 +214,11 @@ POST /cases/{case_id}/reverse
 POST /cases/{case_id}/close
 ```
 
-The reversal workflow is important for fair customer treatment. If an analyst determines a held or blocked transaction is legitimate, the restriction can be reversed and logged.
+The reversal workflow matters because fraud systems must be fair. If a restriction is later found to be legitimate customer behavior, the analyst can reverse the decision and preserve the reason in the audit trail.
 
-Example reversal response:
+### Audit Trail and History
 
-```json
-{
-  "message": "Transaction restriction reversed successfully",
-  "case_id": "CASE-0012",
-  "transaction_id": "credit_005",
-  "status": "REVERSED"
-}
-```
-
----
-
-## Audit Trail
-
-Every major decision is auditable.
-
-Boujuron records actions such as:
+Boujuron records major system and analyst actions, including:
 
 - `CASE_CREATED`
 - `TRANSACTION_HELD`
@@ -342,25 +230,26 @@ Boujuron records actions such as:
 - `REVERSED`
 - `CLOSED`
 
-Audit data supports fraud operations, compliance reviews, internal investigations, and client reporting.
+Low-risk activity is not shown in the main fraud dashboard queue. It is preserved in history so the analyst dashboard stays focused on suspicious activity.
 
 ---
 
-## Dashboard and Investigation Console
+## Fraud Operations Dashboard
 
-The React dashboard is the fraud operations command center.
+The React dashboard is the main fraud operations command center.
 
 It includes:
 
-- Real-time alert queue
-- Risk score movement chart
+- Actionable fraud decision queue
+- Risk score movement
 - Risk mix distribution
 - Live activity feed
 - Notification bell
-- Case status visibility
+- Operational KPI cards
 - Inline analyst actions
 - Investigation drawer
 - User risk profiles
+- Case management
 - Executive analytics
 - CSV export
 - PDF fraud reports
@@ -371,7 +260,7 @@ It includes:
 
 ### Investigation Drawer
 
-The drawer gives analysts the full story of a risk decision:
+The investigation drawer gives analysts the full story behind a decision:
 
 - Customer ID
 - Transaction ID
@@ -386,11 +275,11 @@ The drawer gives analysts the full story of a risk decision:
 - Explainable score breakdown
 - Timeline of events
 - Fraud playbook
-- Case/audit context
+- Case and audit context
 
 ### Fraud Playbooks
 
-Boujuron guides analysts with recommended next steps for:
+Boujuron recommends investigation steps for common fraud scenarios:
 
 - Account takeover
 - Bot attack
@@ -399,11 +288,9 @@ Boujuron guides analysts with recommended next steps for:
 - Manipulated device
 - General fraud review
 
----
+### User Risk Profiles
 
-## User Risk Profiles
-
-Each customer profile can show:
+Customer profiles can show:
 
 - Current risk score
 - Risk trend
@@ -419,13 +306,11 @@ Each customer profile can show:
 - Previous investigations
 - Evidence graph
 
-This helps analysts understand the customer story, not just a single transaction.
-
 ---
 
 ## Behavioral Intelligence
 
-Boujuron maintains organization-scoped behavioral baselines, including:
+Boujuron maintains organization-scoped behavioral baselines such as:
 
 - Average transaction amount
 - Trusted device fingerprints
@@ -435,24 +320,13 @@ Boujuron maintains organization-scoped behavioral baselines, including:
 - Event frequency
 - Historical risk movement
 
-Behavioral scoring is designed to avoid unfairly punishing new customers with limited history. Low-risk events can strengthen a profile, while high-risk activity is not automatically treated as normal.
-
-Admins can configure baseline behavior in the settings area, including:
-
-- Amount spike multiplier
-- New device/location sensitivity
-- Activity-hour sensitivity
-- Velocity window
-- Event limits
-- Adaptive learning controls
+Low-risk events can strengthen a customer profile. High-risk activity does not automatically become normal behavior.
 
 ---
 
 ## Authentication and Access Control
 
-Boujuron uses controlled platform access.
-
-Supported access features:
+Boujuron includes controlled access features:
 
 - Invite-only registration
 - 24-hour invite tokens
@@ -473,30 +347,30 @@ Read-Only Auditor
 
 ---
 
-## Architecture
+## System Architecture
 
-Current production architecture:
+Current production-oriented architecture:
 
 ```text
-Client / Dashboard / Partner System
+Client Platform / Dashboard / Partner System
               |
               v
-      FastAPI Dashboard API
+       FastAPI Dashboard API
               |
               v
-       Risk Engine Service
+        Risk Engine Service
               |
               v
-  Debit Rules | Credit Rules | Shared Rules
+ Debit Rules | Credit Rules | Shared Rules
               |
               v
-    PostgreSQL / Supabase Database
+      PostgreSQL-compatible Database
               |
               v
- React Fraud Operations Dashboard
+  React Fraud Operations Dashboard
 ```
 
-Local distributed architecture also supports:
+Local distributed architecture also supports event-streaming mode:
 
 ```text
 Client Platforms
@@ -525,14 +399,14 @@ Dashboard API and React Console
 | ----- | ---------- |
 | Frontend | React, TypeScript, Vite, Recharts, Lucide Icons |
 | Backend API | Python, FastAPI, Pydantic |
-| Risk Engine | Python rule modules and behavioral scoring |
+| Risk Engine | Python rule modules, decision logic, behavioral scoring |
 | Database | PostgreSQL / Supabase-compatible Postgres |
 | Streaming | Kafka / Redpanda for local distributed mode |
 | Authentication | JWT, invite tokens, role-based access |
 | Reports | CSV and PDF exports |
 | Deployment | Docker, Fly.io |
 | Local Dev | Docker Compose |
-| Testing | Pytest, TypeScript build |
+| Testing | Pytest, TypeScript production build |
 
 ---
 
@@ -601,11 +475,15 @@ boujuron-intelligence/
 | `POST` | `/auth/forgot-password` | Request password reset |
 | `POST` | `/auth/reset-password` | Reset password |
 | `POST` | `/risk-score` | Score a transaction or behavioral event |
-| `GET` | `/fraud-alerts` | Fetch dashboard alerts |
+| `GET` | `/fraud-alerts` | Fetch actionable dashboard alerts |
 | `GET` | `/events` | Fetch event history |
 | `GET` | `/cases` | Fetch fraud cases |
 | `GET` | `/cases/{case_id}` | Fetch case detail |
+| `POST` | `/cases/{case_id}/review` | Mark case under review |
+| `POST` | `/cases/{case_id}/confirm-fraud` | Confirm fraud |
+| `POST` | `/cases/{case_id}/false-positive` | Mark false positive |
 | `POST` | `/cases/{case_id}/reverse` | Reverse a restriction |
+| `POST` | `/cases/{case_id}/close` | Close case |
 | `GET` | `/audit-logs` | Fetch audit logs |
 | `GET` | `/customers/{user_id}/profile` | Fetch customer risk profile |
 | `GET` | `/customers/{user_id}/evidence-graph` | Fetch customer evidence graph |
@@ -706,7 +584,7 @@ Full test suite:
 
 ## Deployment
 
-Boujuron is currently deployable as a Dockerized FastAPI + React application.
+Boujuron is deployable as a Dockerized FastAPI + React application.
 
 Production deployment target:
 
@@ -718,7 +596,6 @@ Current Fly configuration:
 
 ```text
 App: boujuron-intelligence
-Primary region: iad
 Internal port: 8000
 ```
 
@@ -745,6 +622,38 @@ Expected response:
 
 ---
 
+## Hackathon Build Notes: How Codex & GPT-5.6 Were Used
+
+Boujuron was built collaboratively by the Boujuron team with assistance from **Codex** and **GPT-5.6** as AI engineering and product acceleration tools.
+
+Codex and GPT-5.6 were used to support:
+
+- Product planning and feature prioritization for fraud operations workflows
+- Translating fraud feedback into implementable technical requirements
+- Drafting and refining backend API designs
+- Structuring the risk decision model for debit, credit, ATO, bot, and device signals
+- Improving frontend dashboard UX, mobile responsiveness, investigation drawer layout, and analyst workflow clarity
+- Generating documentation drafts, architecture explanations, demo scripts, and investor/client positioning material
+- Debugging deployment issues across Docker, Netlify, Render, Fly.io, Supabase/PostgreSQL, and environment variables
+- Reviewing implementation direction and helping keep the product focused on solving analyst workload and fraud response problems
+
+The implementation remained a collaborative engineering effort. The team made the product decisions, validated the fraud workflows, tested the platform, and shaped Boujuron around real fraud operations feedback.
+
+---
+
+## Devpost / Hackathon Access Note
+
+If this repository is private during judging, access should be shared with:
+
+```text
+testing@devpost.com
+build-week-event@openai.com
+```
+
+This ensures reviewers can inspect the implementation, documentation, and project history.
+
+---
+
 ## Business Documentation
 
 The project includes product and functional documentation:
@@ -767,7 +676,8 @@ Boujuron is designed around the following principles:
 - Organization data isolation foundation
 - API key support for client integrations
 - Audit logs for major fraud actions
-- PND/block only for high-confidence critical events
+- Low-risk noise kept out of the dashboard queue
+- Account-level PND/block only for high-confidence critical events
 - Reversal support for false positives
 - Secure handling of customer event data
 
