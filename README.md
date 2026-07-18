@@ -8,7 +8,7 @@ This project is being submitted for a hackathon as a working product prototype a
 
 ---
 
-## Hackathon Summary
+## Summary
 
 Fraud teams do not only need another dashboard. They need a system that can answer:
 
