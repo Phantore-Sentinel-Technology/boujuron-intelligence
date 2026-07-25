@@ -1432,6 +1432,88 @@ def behavioral_context(cursor, organization_id: int, user_id: str, event_timesta
     }
 
 
+def historical_account_intelligence(
+    cursor,
+    organization_id: int,
+    user_id: str,
+    event: dict,
+    device_data: dict,
+) -> dict:
+    """Build bank-manager-grade context from stored transaction history."""
+    ensure_event_table(cursor)
+    timestamp = event_datetime(event["timestamp"])
+    direction = str(event.get("transaction_direction") or "DEBIT").upper()
+    bank_code = str(event.get("bank_code") or event.get("metadata", {}).get("bank_code") or "").strip()
+    account_number = str(
+        event.get("account_number")
+        or event.get("metadata", {}).get("account_number")
+        or user_id
+    ).strip()
+    device_id = str(event.get("device_id") or device_data.get("fingerprint") or "").strip()
+    thirty_days_ago = timestamp - timedelta(days=30)
+    velocity_start = timestamp - timedelta(minutes=10)
+
+    cursor.execute("""
+        SELECT
+            COUNT(*),
+            COALESCE(AVG(amount), 0),
+            COALESCE(MAX(amount), 0),
+            COALESCE(AVG(amount) FILTER (WHERE UPPER(COALESCE(transaction_direction, 'DEBIT')) = 'DEBIT'), 0),
+            COALESCE(AVG(amount) FILTER (WHERE UPPER(COALESCE(transaction_direction, 'DEBIT')) = 'CREDIT'), 0),
+            COUNT(*) FILTER (
+                WHERE UPPER(COALESCE(transaction_direction, 'DEBIT')) = 'DEBIT'
+                  AND timestamp >= %s
+            ),
+            COUNT(*) FILTER (
+                WHERE UPPER(COALESCE(transaction_direction, 'DEBIT')) = 'CREDIT'
+                  AND timestamp >= %s
+            ),
+            COUNT(*) FILTER (
+                WHERE UPPER(COALESCE(transaction_direction, 'DEBIT')) = %s
+                  AND timestamp >= %s
+            )
+        FROM events
+        WHERE organization_id = %s
+          AND user_id = %s
+          AND timestamp < %s
+    """, (
+        thirty_days_ago,
+        thirty_days_ago,
+        direction,
+        velocity_start,
+        organization_id,
+        user_id,
+        timestamp,
+    ))
+    trend = cursor.fetchone() or (0, 0, 0, 0, 0, 0, 0, 0)
+
+    same_bank_device_accounts = 0
+    if bank_code and device_id:
+        cursor.execute("""
+            SELECT COUNT(DISTINCT COALESCE(NULLIF(metadata->>'account_number', ''), user_id))
+            FROM events
+            WHERE organization_id = %s
+              AND COALESCE(NULLIF(device_id, ''), metadata->>'device_id') = %s
+              AND metadata->>'bank_code' = %s
+              AND COALESCE(NULLIF(metadata->>'account_number', ''), user_id) <> %s
+        """, (organization_id, device_id, bank_code, account_number))
+        same_bank_device_accounts = cursor.fetchone()[0] or 0
+
+    return {
+        "historical_event_count": int(trend[0] or 0),
+        "historical_average_amount": float(trend[1] or 0),
+        "historical_max_amount": float(trend[2] or 0),
+        "historical_debit_average": float(trend[3] or 0),
+        "historical_credit_average": float(trend[4] or 0),
+        "debits_last_30_days": int(trend[5] or 0),
+        "credits_last_30_days": int(trend[6] or 0),
+        "same_direction_velocity_10m": int(trend[7] or 0),
+        "same_bank_device_account_count": int(same_bank_device_accounts),
+        "bank_code": bank_code,
+        "account_number": account_number,
+    }
+
+
 def update_behavior_profile(
     cursor,
     organization_id: int,
@@ -2577,6 +2659,13 @@ async def score_risk(
     behavior = behavioral_context(cursor, organization_id, payload.user_id, event["timestamp"])
     behavior["device_intelligence"] = device_data
     behavior["account_takeover"] = takeover_context
+    behavior["historical_account"] = historical_account_intelligence(
+        cursor,
+        organization_id,
+        payload.user_id,
+        event,
+        device_data,
+    )
     result = analyze_event(event, behavior)
     shared_signal = consortium_signal(cursor, organization_id, event, device_data)
     if shared_signal:
@@ -2605,6 +2694,13 @@ async def score_risk(
     )
     metadata = {
         **payload.metadata,
+        "account_number": payload.account_number,
+        "bank_code": payload.bank_code,
+        "bank_name": payload.bank_name,
+        "counterparty_account": payload.counterparty_account,
+        "counterparty_bank": payload.counterparty_bank,
+        "counterparty_ip": payload.counterparty_ip,
+        "sender_ip": payload.sender_ip,
         "is_rooted": payload.is_rooted,
         "is_emulator": payload.is_emulator,
         "browser_tampering": payload.browser_tampering,

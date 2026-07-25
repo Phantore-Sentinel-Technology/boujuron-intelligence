@@ -79,6 +79,7 @@ def shared_transaction_signals(event, behavior):
     timestamp = parse_timestamp(event.get("timestamp"))
     device_intelligence = behavior.get("device_intelligence") or {}
     takeover_context = behavior.get("account_takeover") or {}
+    history = behavior.get("historical_account") or {}
 
     profile_ready = int(behavior.get("trusted_event_count") or 0) >= int(risk_settings.get("minimum_profile_events", 3))
 
@@ -117,12 +118,35 @@ def shared_transaction_signals(event, behavior):
     if ip in SUSPICIOUS_IPS:
         signals.append(signal("NETWORK", f"Blacklisted IP: {ip}", SUSPICIOUS_IPS[ip], "IP address matched the configured blocklist", "STRONG"))
 
+    counterparty_ip = str(
+        event_value(event, "counterparty_ip")
+        or event_value(event, "sender_ip")
+        or event_value(event, "source_ip")
+        or ""
+    ).strip()
+    if direction == "CREDIT" and counterparty_ip in SUSPICIOUS_IPS:
+        signals.append(signal(
+            "CREDIT",
+            "Incoming credit from watchlisted IP",
+            90,
+            f"Incoming funds originated from watchlisted IP {counterparty_ip}",
+            "CRITICAL",
+        ))
+
     if network == "TOR":
         signals.append(signal("NETWORK", "TOR network detected", TOR_NETWORK_SCORE, "Connection is routed through TOR", "CRITICAL"))
     elif network in {"VPN", "PROXY"}:
         signals.append(signal("NETWORK", f"{network} usage detected", 25, f"Connection is routed through a {network}"))
 
     failed_login_count = event_int(event, "failed_login_count")
+    if failed_login_count >= 3 and event_type in {"login_failure", "multiple_failed_logins", "login"}:
+        signals.append(signal(
+            "DEVICE",
+            "Device locked after 3 failed login attempts",
+            90,
+            f"{failed_login_count} repeated failed login attempts crossed the device-lock threshold",
+            "CRITICAL",
+        ))
     if event_type in {"multiple_failed_logins", "login_failure"}:
         signals.append(signal("ACCOUNT_TAKEOVER", "Multiple failed login attempts", 30, "Repeated authentication failures were reported"))
     if failed_login_count >= 5 and event_type != "multiple_failed_logins":
@@ -155,6 +179,42 @@ def shared_transaction_signals(event, behavior):
 
     if event_flag(event, "mule_account_suspected"):
         signals.append(signal("NETWORK", "Mule account movement", 45, "Funds movement pattern resembles mule-account pass-through behavior", "STRONG"))
+
+    same_bank_device_accounts = int(history.get("same_bank_device_account_count") or 0)
+    if same_bank_device_accounts >= 1:
+        signals.append(signal(
+            "DEVICE",
+            "Device already tied to another account in this bank",
+            70,
+            f"This device is already linked to {same_bank_device_accounts} other account(s) in the same bank; one-bank-account-per-device policy triggered",
+            "CRITICAL",
+        ))
+
+    history_count = int(history.get("historical_event_count") or 0)
+    historical_average = float(
+        history.get("historical_debit_average" if direction == "DEBIT" else "historical_credit_average")
+        or history.get("historical_average_amount")
+        or 0
+    )
+    amount = float(event.get("amount") or 0)
+    if history_count >= 3 and historical_average > 0 and amount >= max(historical_average * 6, historical_average + 150_000):
+        multiplier = round(amount / historical_average, 1)
+        signals.append(signal(
+            "HISTORY",
+            "Transaction breaks historical account trend",
+            35,
+            f"Current amount is {multiplier}x the historical {direction.lower()} average from the account history table",
+            "STRONG",
+        ))
+    same_direction_velocity = int(history.get("same_direction_velocity_10m") or 0) + 1
+    if same_direction_velocity >= 3:
+        signals.append(signal(
+            "HISTORY",
+            "Historical transaction velocity anomaly",
+            30,
+            f"{same_direction_velocity} {direction.lower()} events were observed within the latest 10-minute history window",
+            "STRONG",
+        ))
 
     transaction_velocity = int(behavior.get("transaction_velocity") or 0)
     transaction_limit = int(risk_settings.get("transaction_velocity_limit", 5))
@@ -241,6 +301,13 @@ def level_from_evidence(score, signals):
         or strong_count >= 3
         or (score >= 98 and len(categories) >= 2)
         or (score >= 98 and len(signals) >= 2)
+        or any(
+            item["label"] in {
+                "Incoming credit from watchlisted IP",
+                "Device locked after 3 failed login attempts",
+            }
+            for item in signals
+        )
     )
     return "CRITICAL" if has_extreme_pattern else "HIGH"
 

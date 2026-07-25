@@ -219,6 +219,13 @@ class RiskScoreRequest(BaseModel):
     user_id: str = Field(min_length=1, max_length=160)
     amount: float = Field(default=0, ge=0)
     transaction_direction: str = "DEBIT"
+    account_number: str | None = None
+    bank_code: str | None = None
+    bank_name: str | None = None
+    counterparty_account: str | None = None
+    counterparty_bank: str | None = None
+    counterparty_ip: str | None = None
+    sender_ip: str | None = None
     device: str | None = None
     device_type: str | None = None
     device_id: str | None = None

@@ -253,3 +253,83 @@ def test_explicit_repetitive_outflow_count_triggers_at_five():
     assert "Repetitive outflow pattern" in result["reasons"]
     assert result["risk_level"] == "MEDIUM"
     assert result["action"] == "STEP_UP_VERIFY"
+
+def test_watchlisted_inflow_ip_triggers_critical_account_protection():
+    result = analyze_event({
+        "user_id": "acct_watchlisted_credit",
+        "transaction_direction": "CREDIT",
+        "amount": 150_000,
+        "event_type": "credit",
+        "device": "iphone",
+        "ip": "102.88.45.90",
+        "counterparty_ip": "45.90.12.10",
+        "location": "nigeria",
+        "timestamp": "2026-06-19T12:00:00",
+    })
+
+    assert "Incoming credit from watchlisted IP" in result["reasons"]
+    assert result["risk_level"] == "CRITICAL"
+    assert result["action"] == "PND_OR_BLOCK"
+
+
+def test_three_failed_login_attempts_lock_device():
+    result = analyze_event({
+        "user_id": "acct_failed_login",
+        "amount": 0,
+        "event_type": "login_failure",
+        "failed_login_count": 3,
+        "device": "android",
+        "ip": "102.88.45.91",
+        "location": "nigeria",
+        "timestamp": "2026-06-19T12:00:00",
+    })
+
+    assert "Device locked after 3 failed login attempts" in result["reasons"]
+    assert result["risk_level"] == "CRITICAL"
+    assert result["action"] == "PND_OR_BLOCK"
+
+
+def test_same_bank_account_per_device_policy_triggers():
+    result = analyze_event(
+        {
+            "user_id": "acct_device_policy",
+            "transaction_direction": "DEBIT",
+            "amount": 20_000,
+            "event_type": "wallet_transfer",
+            "device": "iphone",
+            "ip": "102.88.45.92",
+            "location": "nigeria",
+            "timestamp": "2026-06-19T12:00:00",
+        },
+        {
+            "historical_account": {
+                "same_bank_device_account_count": 1,
+            },
+        },
+    )
+
+    assert "Device already tied to another account in this bank" in result["reasons"]
+    assert result["risk_level"] in {"HIGH", "CRITICAL"}
+
+
+def test_historical_account_trend_break_adds_signal():
+    result = analyze_event(
+        {
+            "user_id": "acct_history",
+            "transaction_direction": "DEBIT",
+            "amount": 800_000,
+            "event_type": "wallet_transfer",
+            "device": "iphone",
+            "ip": "102.88.45.93",
+            "location": "nigeria",
+            "timestamp": "2026-06-19T12:00:00",
+        },
+        {
+            "historical_account": {
+                "historical_event_count": 12,
+                "historical_debit_average": 50_000,
+            },
+        },
+    )
+
+    assert "Transaction breaks historical account trend" in result["reasons"]
