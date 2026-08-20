@@ -4,9 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="6caa4d1e-bbff-4011-91a0-de2a79c9c8d1" name="Changes" comment="">
+    <list default="true" id="6caa4d1e-bbff-4011-91a0-de2a79c9c8d1" name="Changes" comment="feat: sonar testing updated commit by ENGR. IPAYE">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/phantore-sentinel-app.iml" beforeDir="false" afterPath="$PROJECT_DIR$/phantore-sentinel-app.iml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -47,6 +46,65 @@
     <commands />
     <urls />
   </component>
+  <component name="NextEditCompletionFeaturesState">
+    <decayedCancelled>
+      <entry key="MS100" value="1.0017744189655204" />
+      <entry key="MS500" value="1.3535480506378872" />
+      <entry key="S2" value="2.254903815946853" />
+      <entry key="S5" value="3.2152600418433206" />
+      <entry key="S10" value="5.546409097079452" />
+      <entry key="S30" value="11.30862110131718" />
+      <entry key="S60" value="14.152559681731555" />
+      <entry key="M2" value="15.930177321668666" />
+      <entry key="M5" value="17.13395233148938" />
+      <entry key="M10" value="17.56034925890028" />
+      <entry key="M15" value="17.705405844979037" />
+      <entry key="M30" value="17.851950765534873" />
+      <entry key="H1" value="17.925786337910502" />
+      <entry key="H2" value="17.96284578143088" />
+      <entry key="H4" value="17.98141102800743" />
+      <entry key="D1" value="17.996900189057794" />
+      <entry key="W1" value="17.99955712946556" />
+    </decayedCancelled>
+    <decayedSelected>
+      <entry key="MS100" value="0.0" />
+      <entry key="MS500" value="0.0" />
+      <entry key="S2" value="0.0" />
+      <entry key="S5" value="0.0" />
+      <entry key="S10" value="0.0" />
+      <entry key="S30" value="0.0" />
+      <entry key="S60" value="0.0" />
+      <entry key="M2" value="0.0" />
+      <entry key="M5" value="0.0" />
+      <entry key="M10" value="0.0" />
+      <entry key="M15" value="0.0" />
+      <entry key="M30" value="0.0" />
+      <entry key="H1" value="0.0" />
+      <entry key="H2" value="0.0" />
+      <entry key="H4" value="0.0" />
+      <entry key="D1" value="0.0" />
+      <entry key="W1" value="0.0" />
+    </decayedSelected>
+    <decayedShown>
+      <entry key="MS100" value="0.9609662304069853" />
+      <entry key="MS500" value="1.3421388421760343" />
+      <entry key="S2" value="2.2498593310518924" />
+      <entry key="S5" value="3.2120543787073337" />
+      <entry key="S10" value="5.542680843922494" />
+      <entry key="S30" value="11.305219875574425" />
+      <entry key="S60" value="14.150278590641072" />
+      <entry key="M2" value="15.928850336950976" />
+      <entry key="M5" value="17.133370306077357" />
+      <entry key="M10" value="17.56004910838025" />
+      <entry key="M15" value="17.705203667348844" />
+      <entry key="M30" value="17.851848626186012" />
+      <entry key="H1" value="17.925735003351207" />
+      <entry key="H2" value="17.96282004764667" />
+      <entry key="H4" value="17.981398144453642" />
+      <entry key="D1" value="17.996898039481685" />
+      <entry key="W1" value="17.999556822326486" />
+    </decayedShown>
+  </component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 3
 }</component>
@@ -63,6 +121,7 @@
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.git.unshallow": "true",
     "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "SONARLINT_PRECOMMIT_ANALYSIS": "true",
     "WebServerToolWindowFactoryState": "false",
     "codeWithMe.voiceChat.enabledByDefault": "false",
     "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
@@ -143,6 +202,10 @@
         </entry>
       </map>
     </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="feat: sonar testing updated commit by ENGR. IPAYE" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat: sonar testing updated commit by ENGR. IPAYE" />
   </component>
   <component name="XSLT-Support.FileAssociations.UIState">
     <expand />
