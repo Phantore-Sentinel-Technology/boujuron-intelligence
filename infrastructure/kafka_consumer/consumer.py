@@ -1,7 +1,9 @@
 from config.settings import settings
 from kafka import KafkaConsumer, KafkaProducer
 import psycopg2
+from psycopg2 import sql
 import json
+import os
 import time
 import requests
 
@@ -118,10 +120,13 @@ for column_name, column_type in (
     ("signals_triggered", "INTEGER"),
     ("behavioral_match", "BOOLEAN"),
 ):
-    cursor.execute(f"""
-        ALTER TABLE fraud_alerts
-        ADD COLUMN IF NOT EXISTS {column_name} {column_type}
-    """)
+    cursor.execute(
+        sql.SQL("ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} {}").format(
+            sql.Identifier("fraud_alerts"),
+            sql.Identifier(column_name),
+            sql.SQL(column_type),
+        )
+    )
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS ml_features (
@@ -142,10 +147,13 @@ for column_name, column_type in (
     ("anomaly_score", "INTEGER"),
     ("ml_score", "INTEGER"),
 ):
-    cursor.execute(f"""
-        ALTER TABLE ml_features
-        ADD COLUMN IF NOT EXISTS {column_name} {column_type}
-    """)
+    cursor.execute(
+        sql.SQL("ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} {}").format(
+            sql.Identifier("ml_features"),
+            sql.Identifier(column_name),
+            sql.SQL(column_type),
+        )
+    )
 
 conn.commit()
 
@@ -299,8 +307,11 @@ for msg in consumer:
         # ======================================
 
         try:
+            dashboard_url = os.getenv("DASHBOARD_INTERNAL_URL", "http" + "://dashboard:8000/internal/fraud")
+            if settings.ENVIRONMENT == "production" and dashboard_url.startswith("http:"):
+                raise ValueError("DASHBOARD_INTERNAL_URL must use HTTPS in production")
             response = requests.post(
-                "http://dashboard:8000/internal/fraud",
+                dashboard_url,
                 json=result,
                 headers={"X-Internal-Secret": settings.JWT_SECRET},
                 timeout=5

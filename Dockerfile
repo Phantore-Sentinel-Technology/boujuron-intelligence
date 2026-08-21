@@ -23,4 +23,10 @@ ENV PYTHONPATH=/app
 
 EXPOSE 8000
 
+RUN addgroup --system boujuron && \
+    adduser --system --ingroup boujuron boujuron && \
+    chown -R boujuron:boujuron /app
+
+USER boujuron
+
 CMD ["sh", "-c", "uvicorn services.dashboard_service.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

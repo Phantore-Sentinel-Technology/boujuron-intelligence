@@ -4,8 +4,6 @@
     <meta charset="UTF-8">
     <title>Boujuron Dashboard</title>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
     <style>
 
         * {
@@ -341,7 +339,84 @@
 </div>
 
 <script>
-    const API_URL = "http://localhost:8002/fraud-alerts";
+    class Chart {
+        constructor(canvas, config) {
+            this.canvas = canvas;
+            this.ctx = canvas.getContext("2d");
+            this.config = config;
+            this.resize();
+            this.draw();
+        }
+
+        resize() {
+            const rect = this.canvas.getBoundingClientRect();
+            this.canvas.width = Math.max(rect.width, 320);
+            this.canvas.height = Math.max(rect.height, 220);
+        }
+
+        destroy() {
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        }
+
+        draw() {
+            this.resize();
+            this.destroy();
+            if (this.config.type === "doughnut") {
+                this.drawDoughnut();
+            } else {
+                this.drawLine();
+            }
+        }
+
+        drawDoughnut() {
+            const dataset = this.config.data.datasets[0];
+            const values = dataset.data;
+            const total = values.reduce((sum, value) => sum + value, 0) || 1;
+            const cx = this.canvas.width / 2;
+            const cy = this.canvas.height / 2 + 10;
+            const radius = Math.min(this.canvas.width, this.canvas.height) * 0.28;
+            let start = -Math.PI / 2;
+            values.forEach((value, index) => {
+                const slice = (value / total) * Math.PI * 2;
+                this.ctx.beginPath();
+                this.ctx.arc(cx, cy, radius, start, start + slice);
+                this.ctx.lineWidth = 28;
+                this.ctx.strokeStyle = dataset.backgroundColor[index];
+                this.ctx.stroke();
+                start += slice;
+            });
+        }
+
+        drawLine() {
+            const labels = this.config.data.labels;
+            const values = this.config.data.datasets[0].data;
+            const padding = 36;
+            const width = this.canvas.width - padding * 2;
+            const height = this.canvas.height - padding * 2;
+            const max = Math.max(...values, 1);
+            this.ctx.strokeStyle = "rgba(148,163,184,0.25)";
+            this.ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = padding + (height / 4) * i;
+                this.ctx.beginPath();
+                this.ctx.moveTo(padding, y);
+                this.ctx.lineTo(this.canvas.width - padding, y);
+                this.ctx.stroke();
+            }
+            this.ctx.beginPath();
+            this.ctx.strokeStyle = "#38bdf8";
+            this.ctx.lineWidth = 3;
+            values.forEach((value, index) => {
+                const x = padding + (labels.length <= 1 ? width / 2 : (width / (labels.length - 1)) * index);
+                const y = padding + height - (value / max) * height;
+                if (index === 0) this.ctx.moveTo(x, y);
+                else this.ctx.lineTo(x, y);
+            });
+            this.ctx.stroke();
+        }
+    }
+
+    const API_URL = "/fraud-alerts";
 
     let riskChart, trendChart;
     let allData = [];
@@ -580,7 +655,8 @@ trendChart = new Chart(document.getElementById("trendChart"), {
     });
 
     /* WEBSOCKET (REAL-TIME) */
-    const ws = new WebSocket("ws://localhost:8002/ws/fraud");
+    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws/fraud`);
 
     ws.onmessage = (event) => {
         const newAlert = JSON.parse(event.data);

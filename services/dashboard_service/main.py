@@ -10,12 +10,14 @@ import secrets
 import smtplib
 import time
 import threading
-import urllib.request
+from http.client import HTTPSConnection
+from urllib.parse import urlparse
 from collections import Counter
 from datetime import datetime, timedelta
 from statistics import mean
 
 import psycopg2
+from psycopg2 import sql
 from psycopg2.extras import Json
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -133,6 +135,40 @@ if (FRONTEND_DIST / "assets").exists():
 def get_db():
     conn = psycopg2.connect(settings.DATABASE_URL)
     return conn, conn.cursor()
+
+
+def add_column_if_missing(cursor, table_name: str, column_name: str, column_type: str):
+    cursor.execute(
+        sql.SQL("ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} {}").format(
+            sql.Identifier(table_name),
+            sql.Identifier(column_name),
+            sql.SQL(column_type),
+        )
+    )
+
+
+def https_post_json(target: str, payload: dict, timeout: int = 4):
+    parsed = urlparse(target)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise ValueError("Webhook destinations must use a valid HTTPS URL")
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    body = json.dumps(payload).encode("utf-8")
+    connection = HTTPSConnection(parsed.hostname, parsed.port or 443, timeout=timeout)
+    try:
+        connection.request(
+            "POST",
+            path,
+            body=body,
+            headers={"Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        response.read()
+        if response.status >= 400:
+            raise ValueError(f"Webhook returned HTTP {response.status}")
+    finally:
+        connection.close()
 
 
 def ensure_organization_tables(cursor):
@@ -339,10 +375,7 @@ def ensure_event_table(cursor):
         ("metadata", "JSONB"),
         ("source", "TEXT"),
     ):
-        cursor.execute(f"""
-            ALTER TABLE events
-            ADD COLUMN IF NOT EXISTS {column_name} {column_type}
-        """)
+        add_column_if_missing(cursor, "events", column_name, column_type)
     cursor.execute("""
         UPDATE events
         SET organization_id = (SELECT id FROM organizations WHERE slug = 'boujuron')
@@ -382,10 +415,7 @@ def ensure_risk_decision_table(cursor):
         ("action_decision_id", "INTEGER"),
         ("matched_rules", "JSONB DEFAULT '[]'::jsonb"),
     ):
-        cursor.execute(f"""
-            ALTER TABLE risk_decisions
-            ADD COLUMN IF NOT EXISTS {column_name} {column_type}
-        """)
+        add_column_if_missing(cursor, "risk_decisions", column_name, column_type)
     cursor.execute("ALTER TABLE risk_decisions DROP CONSTRAINT IF EXISTS risk_decisions_idempotency_key_key")
     cursor.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS risk_decisions_org_idempotency_key
@@ -446,10 +476,7 @@ def ensure_case_tables(cursor):
             ("analyst_note", "TEXT"),
             ("reversed_at", "TIMESTAMP"),
         ):
-            cursor.execute(f"""
-                ALTER TABLE cases
-                ADD COLUMN IF NOT EXISTS {column_name} {column_type}
-            """)
+            add_column_if_missing(cursor, "cases", column_name, column_type)
         cursor.execute("""
             UPDATE cases
             SET organization_id = (SELECT id FROM organizations WHERE slug = 'boujuron')
@@ -582,10 +609,7 @@ def ensure_fraud_alert_columns(cursor):
         ("signals_triggered", "INTEGER"),
         ("behavioral_match", "BOOLEAN"),
     ):
-        cursor.execute(f"""
-            ALTER TABLE fraud_alerts
-            ADD COLUMN IF NOT EXISTS {column_name} {column_type}
-        """)
+        add_column_if_missing(cursor, "fraud_alerts", column_name, column_type)
     cursor.execute("""
         UPDATE fraud_alerts
         SET organization_id = (SELECT id FROM organizations WHERE slug = 'boujuron')
@@ -2161,10 +2185,11 @@ def deliver_alerts(cursor, organization_id: int, alert: dict):
         status = "SENT"
         try:
             if channel in {"SLACK", "TEAMS", "WEBHOOK"}:
-                body = json.dumps({"text": f"{message['title']}\nUser: {message['user']}\nRisk: {message['risk']}\nAction: {message['action']}", **message}).encode()
-                request = urllib.request.Request(target, data=body, headers={"Content-Type": "application/json"}, method="POST")
-                with urllib.request.urlopen(request, timeout=4):
-                    pass
+                https_post_json(
+                    target,
+                    {"text": f"{message['title']}\nUser: {message['user']}\nRisk: {message['risk']}\nAction: {message['action']}", **message},
+                    timeout=4,
+                )
             elif channel == "EMAIL":
                 smtp_host = os.getenv("SMTP_HOST")
                 if not smtp_host:
@@ -2393,13 +2418,16 @@ def update_behavior_settings(
     organization_id = current_user.organization_id or default_organization_id(cursor)
     behavior_settings(cursor, organization_id)
     if changes:
-        clauses = [f"{field} = %s" for field in changes]
+        clauses = [
+            sql.SQL("{} = %s").format(sql.Identifier(field))
+            for field in changes
+        ]
         values = list(changes.values()) + [organization_id]
-        cursor.execute(f"""
+        cursor.execute(sql.SQL("""
             UPDATE organization_risk_settings
-            SET {', '.join(clauses)}, updated_at = CURRENT_TIMESTAMP
+            SET {}, updated_at = CURRENT_TIMESTAMP
             WHERE organization_id = %s
-        """, values)
+        """).format(sql.SQL(", ").join(clauses)), values)
     response = behavior_settings_response(cursor, organization_id)
     conn.commit()
     conn.close()
@@ -3583,18 +3611,23 @@ def update_case(case_id: int, payload: CaseUpdateRequest, current_user: AuthUser
     }
     fraud_alert_id = before[7]
 
-    set_clauses = ["updated_at = CURRENT_TIMESTAMP"]
+    set_clauses = [sql.SQL("updated_at = CURRENT_TIMESTAMP")]
     params = []
     for field, value in changes.items():
-        set_clauses.append(f"{field} = %s")
+        set_clauses.append(sql.SQL("{} = %s").format(sql.Identifier(field)))
         params.append(value)
     if "assigned_to" in changes and changes["assigned_to"]:
-        set_clauses.append("assigned_at = CURRENT_TIMESTAMP")
+        set_clauses.append(sql.SQL("assigned_at = CURRENT_TIMESTAMP"))
     if changes.get("status") == "RESOLVED":
-        set_clauses.append("resolved_at = CURRENT_TIMESTAMP")
+        set_clauses.append(sql.SQL("resolved_at = CURRENT_TIMESTAMP"))
     params.append(case_id)
     params.append(organization_id)
-    cursor.execute(f"UPDATE cases SET {', '.join(set_clauses)} WHERE id = %s AND organization_id = %s", params)
+    cursor.execute(
+        sql.SQL("UPDATE cases SET {} WHERE id = %s AND organization_id = %s").format(
+            sql.SQL(", ").join(set_clauses)
+        ),
+        params,
+    )
 
     actor = current_user.name
     labels = {
@@ -3716,27 +3749,27 @@ def perform_case_action(
         raise HTTPException(status_code=404, detail="Case not found")
 
     _, previous_status, transaction_id, user_id, fraud_alert_id = row
-    set_clauses = ["status = %s", "updated_at = CURRENT_TIMESTAMP"]
+    set_clauses = [sql.SQL("status = %s"), sql.SQL("updated_at = CURRENT_TIMESTAMP")]
     params = [new_status]
     if feedback:
-        set_clauses.append("analyst_feedback = %s")
+        set_clauses.append(sql.SQL("analyst_feedback = %s"))
         params.append(feedback)
     if decision:
-        set_clauses.append("decision = %s")
+        set_clauses.append(sql.SQL("decision = %s"))
         params.append(decision)
     if note:
-        set_clauses.append("analyst_note = %s")
+        set_clauses.append(sql.SQL("analyst_note = %s"))
         params.append(note)
     if new_status in {"CONFIRMED_FRAUD", "FALSE_POSITIVE", "REVERSED", "CLOSED", "RESOLVED"}:
-        set_clauses.append("resolved_at = COALESCE(resolved_at, CURRENT_TIMESTAMP)")
+        set_clauses.append(sql.SQL("resolved_at = COALESCE(resolved_at, CURRENT_TIMESTAMP)"))
     if new_status == "REVERSED":
-        set_clauses.append("reversed_at = CURRENT_TIMESTAMP")
+        set_clauses.append(sql.SQL("reversed_at = CURRENT_TIMESTAMP"))
     params.extend([case_id, organization_id])
-    cursor.execute(f"""
+    cursor.execute(sql.SQL("""
         UPDATE cases
-        SET {', '.join(set_clauses)}
+        SET {}
         WHERE id = %s AND organization_id = %s
-    """, params)
+    """).format(sql.SQL(", ").join(set_clauses)), params)
 
     if note:
         cursor.execute("""
